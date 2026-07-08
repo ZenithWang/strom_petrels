@@ -1,0 +1,44 @@
+# Local tooling and editor state
+.agents/
+.codex/
+.idea/
+.vscode/
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Project data, generated workspace outputs, and trained models
+workspace/
+archive/
+*.db
+*.sqlite
+*.sqlite3
+*.h5
+*.keras
+*.tflite
+*.joblib
+*.pkl
+
+# Audio and large generated media
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+~$*
+.DS_Store
+Thumbs.db
+documents/download/
+documents/papers/*.pdf

@@ -13,83 +13,169 @@ The current binary task is:
 ## Repository Layout
 
 ```text
-scripts/project_config.py                 Shared path configuration for local and server runs
-scripts/data_processing/run_pipeline.py   End-to-end data preparation entrypoint
-scripts/data_processing/prepare_dataset.py
-scripts/data_processing/build_birdnet_fold_dataset.py
-scripts/model_training/run_nested_cv.py   Nested-CV BirdNET training and evaluation
-scripts/results_analysis/summarize_nested_cv.py
+project_config.py                         Shared path configuration
+data_processing/run_pipeline.py           End-to-end data preparation entrypoint
+data_processing/prepare_dataset.py
+data_processing/build_birdnet_fold_dataset.py
+model_training/run_nested_cv.py           Nested-CV BirdNET training and evaluation
+model_training/train_deployment_model.py
+long_recording_analysis/                  Streaming inference and candidate extraction
+comp_chick_adult/                         Adult/chick date-proxy acoustic comparison
+results_analysis/summarize_nested_cv.py
 workspace/                                Generated clips, folds, model outputs, summaries
 ```
 
 Notebook files are kept for inspection, but the reproducible workflow is script-based.
 
-On the server, the working directory is expected to use this flatter layout:
+Local and server installations use this same physical layout:
 
 ```text
 /mnt/home/alyzw89/working/project_config.py
 /mnt/home/alyzw89/working/data_processing/
 /mnt/home/alyzw89/working/model_training/
+/mnt/home/alyzw89/working/long_recording_analysis/
+/mnt/home/alyzw89/working/comp_chick_adult/
 /mnt/home/alyzw89/working/results_analysis/
 /mnt/home/alyzw89/working/workspace/
 ```
 
-`results_analysis/` is needed for the final summary step. If it is not currently under `/mnt/home/alyzw89/working`, copy it there before running `python results_analysis/summarize_nested_cv.py`.
+`results_analysis/` is needed for the final summary step.
+
+To synchronize the complete workflow while preserving this identical layout, preview first and then apply:
+
+```bash
+python sync_project.py alyzw89@strange:~/working
+python sync_project.py alyzw89@strange:~/working --apply
+```
+
+Only configuration, environment documentation, and the five functional code directories are synchronized.
+`workspace`, `.env`, databases, audio, models, caches, tests, documents, exploratory notebooks, and local
+IDE/agent files stay machine-local. Use `--apply --delete` only to remove stale files inside the five
+synchronized code directories.
+
+## Server Quick Start: Adult/Chick Comparison
+
+After synchronizing from the local machine, log in and run:
+
+```bash
+ssh alyzw89@strange
+cd ~/working
+conda activate strompetrel-birdnet
+
+ls workspace/models/deployment/model.tflite
+ls workspace/models/deployment/model_Labels.txt
+
+python comp_chick_adult/run_analysis.py \
+  --recordings-dir /mnt/home/alyzw89/data/2021/recordings \
+  --analysis-name adult_proxy_vs_chick_proxy \
+  --threshold 0.80 \
+  --adult-proxy-end 2021-05-31 \
+  --chick-proxy-start 2021-07-23
+```
+
+No general long-recording run is required first, and no project/workspace environment variables are
+needed when `project_config.py` and `workspace/` are both under `~/working`. The first run scans and
+caches the selected date phases under
+`workspace/comp_chick_adult/adult_proxy_vs_chick_proxy/scan/`; later identical runs reuse those scores.
+Use `--rescan` only after changing the recordings, deployment model, or date boundaries.
+If the printed resolved paths still point outside `~/working`, remove stale `STORM_PETREL_*` exports
+from the current shell or `~/.bashrc`, because shell values override `.env` and defaults.
+
+If the database or audio root is also needed by other workflows, create a machine-local `~/working/.env`:
+
+```dotenv
+STORM_PETREL_DB_PATH=/mnt/home/alyzw89/data/2021/storm_petrel_2021_full.db
+STORM_PETREL_AUDIO_ROOT=/mnt/home/alyzw89/data/2021/recordings
+```
+
+The `.env` file is intentionally not synchronized because paths may differ between machines.
 
 ## Python Environments
 
-Data preparation needs Python with audio and table libraries:
+The root `environment.yml` contains the dependencies for data preparation, model training, and notebooks. Create the environment with:
 
 ```bash
-pip install librosa soundfile pandas scikit-learn
+conda env create -f environment.yml
+conda activate strompetrel
+python verify_environment.py
 ```
 
-Model training needs Python 3.11 with BirdNET-Analyzer training support:
+Update an existing environment with:
 
 ```bash
-pip install "birdnet-analyzer[train]" pandas scikit-learn tensorflow soundfile
+conda env update -n strompetrel -f environment.yml
 ```
 
-On this Windows machine the working training interpreter is:
+The environment uses Python 3.11 and the BirdNET-Analyzer 2.4.0 training extra. Acoustic comparison
+plots additionally use `matplotlib`; it is included explicitly in `environment.yml`.
+
+### PyCharm
+
+Open `File | Settings | Project | Python Interpreter`, select `Add Interpreter | Add Local Interpreter | Conda Environment | Existing environment`, and choose the Conda interpreter. On the documented Windows machine it is:
 
 ```powershell
 D:\Users\93508\anaconda3\envs\strompetrel\python.exe
 ```
 
-On a server, use the Python executable from the server environment that has the packages above installed.
+The current Linux/Miniforge interpreter is `/home/zenith/miniforge3/envs/strompetrel/bin/python`.
+
+PyCharm will load the shared `Verify Environment`, `Data Pipeline`, `Nested CV Training`, and `Summarize Results` run configurations from `.run/`. Before running the data pipeline, add the real `STORM_PETREL_DB_PATH` and `STORM_PETREL_AUDIO_ROOT` values to the `Data Pipeline` configuration; personal data paths are intentionally not stored in the shared files.
 
 ## Path Configuration
 
-All scripts read paths from `scripts/project_config.py`. Do not hard-code server paths inside the scripts. Set environment variables before running the pipeline.
+All scripts read paths from the root-level `project_config.py`. Local and server directories are physically
+identical. When the code folders and `workspace/` are under the same working directory, no project/workspace
+environment variables are required; use overrides only for data or output stored elsewhere.
+
+Runtime path overrides can be stored once in a root-level `.env` file instead of exporting them for every
+shell session:
+
+```bash
+cp .env.example .env
+# Edit .env and replace the example absolute paths.
+```
+
+`project_config.py` loads `.env` automatically. Existing shell variables take precedence, and `.env` is
+ignored by Git. Set `STORM_PETREL_ENV_FILE` only when a different env-file location is required.
 
 Important variables:
 
 ```bash
+cd /mnt/home/alyzw89/working
 export STORM_PETREL_PROJECT_ROOT=/mnt/home/alyzw89/working
 export STORM_PETREL_DB_PATH=/mnt/home/alyzw89/data/2021/storm_petrel_2021_full.db
 export STORM_PETREL_AUDIO_ROOT=/mnt/home/alyzw89/data/2021/recordings
-export STORM_PETREL_WORKSPACE_DIR=/mnt/home/alyzw89/working/workspace
-export STORM_PETREL_MODEL_ROOT=/mnt/home/alyzw89/working/workspace/models/nested_cv_stratified
+export STORM_PETREL_WORKSPACE_DIR="$STORM_PETREL_PROJECT_ROOT/workspace"
+export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_balanced"
+export STORM_PETREL_DEPLOYMENT_MODEL_DIR="$STORM_PETREL_WORKSPACE_DIR/models/deployment"
+export STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR="$STORM_PETREL_WORKSPACE_DIR/long_recording_analysis"
+export STORM_PETREL_COMP_CHICK_ADULT_DIR="$STORM_PETREL_WORKSPACE_DIR/comp_chick_adult"
 ```
 
 Meaning:
 
-- `STORM_PETREL_PROJECT_ROOT`: repository folder containing `scripts/`
+- `STORM_PETREL_PROJECT_ROOT`: repository root locally, or the flattened working directory on the server
 - `STORM_PETREL_DB_PATH`: SQLite database with BirdNET-style detections. The README assumes the file is `/mnt/home/alyzw89/data/2021/storm_petrel_2021_full.db`; change only the filename if the database has a different name.
 - `STORM_PETREL_AUDIO_ROOT`: folder containing the original full recordings; files can be nested in subfolders
 - `STORM_PETREL_WORKSPACE_DIR`: where generated clips, manifests, folds, and fold datasets are written
 - `STORM_PETREL_MODEL_ROOT`: where trained models, predictions, and metric summaries are written
+- `STORM_PETREL_DEPLOYMENT_MODEL_DIR`: all-clips deployment model output
+- `STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR`: long-recording scores, detections, and candidate WAV outputs
+- `STORM_PETREL_COMP_CHICK_ADULT_DIR`: adult/chick proxy tables, figures, reports, and representative audio
 
 If a variable is not set, defaults are resolved relative to the project folder:
 
 ```text
-DB_PATH       = scripts/data_processing/storm_petrel_2021_full.db
+DB_PATH       = data_processing/storm_petrel_2021_full.db
 AUDIO_ROOT    = download/data
 WORKSPACE_DIR = workspace
 MODEL_ROOT    = workspace/models/nested_cv
+DEPLOYMENT_MODEL_DIR = workspace/models/deployment
+LONG_RECORDING_ANALYSIS_DIR = workspace/long_recording_analysis
+COMP_CHICK_ADULT_DIR = workspace/comp_chick_adult
 ```
 
-Every script prints the resolved paths at startup. Check those lines first when running on a server.
+The training script prints the resolved project, dataset, and model paths before validating the fold directories.
 
 ## Expected Input Data
 
@@ -101,7 +187,7 @@ Before data preparation, the server should have:
 /mnt/home/alyzw89/data/2021/recordings/  Full source recordings
 ```
 
-The audio root should contain files referenced by the database recording paths or names. The lookup supports common audio extensions such as `.flac`, `.wav`, `.mp3`, `.ogg`, `.m4a`, and `.webm`.
+The audio root should contain files referenced by the database recording names. Files are matched by filename or stem, including inside nested directories.
 
 ## Data Processing
 
@@ -111,12 +197,12 @@ Windows example:
 
 ```powershell
 $env:STORM_PETREL_PROJECT_ROOT="D:\Users\93508\Documents\StromPetrels"
-$env:STORM_PETREL_DB_PATH="D:\Users\93508\Documents\StromPetrels\scripts\data_processing\storm_petrel_2021_full.db"
+$env:STORM_PETREL_DB_PATH="D:\Users\93508\Documents\StromPetrels\data_processing\storm_petrel_2021_full.db"
 $env:STORM_PETREL_AUDIO_ROOT="D:\path\to\recordings"
 $env:STORM_PETREL_WORKSPACE_DIR="D:\Users\93508\Documents\StromPetrels\workspace"
-$env:STORM_PETREL_MODEL_ROOT="D:\Users\93508\Documents\StromPetrels\workspace\models\nested_cv_stratified"
+$env:STORM_PETREL_MODEL_ROOT="D:\Users\93508\Documents\StromPetrels\workspace\models\nested_cv_balanced"
 
-D:\Users\93508\anaconda3\envs\strompetrel\python.exe scripts\data_processing\run_pipeline.py
+D:\Users\93508\anaconda3\envs\strompetrel\python.exe data_processing\run_pipeline.py
 ```
 
 Linux/server example:
@@ -127,8 +213,8 @@ cd /mnt/home/alyzw89/working
 export STORM_PETREL_PROJECT_ROOT=/mnt/home/alyzw89/working
 export STORM_PETREL_DB_PATH=/mnt/home/alyzw89/data/2021/storm_petrel_2021_full.db
 export STORM_PETREL_AUDIO_ROOT=/mnt/home/alyzw89/data/2021/recordings
-export STORM_PETREL_WORKSPACE_DIR=/mnt/home/alyzw89/working/workspace
-export STORM_PETREL_MODEL_ROOT=/mnt/home/alyzw89/working/workspace/models/nested_cv_stratified
+export STORM_PETREL_WORKSPACE_DIR="$STORM_PETREL_PROJECT_ROOT/workspace"
+export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_balanced"
 
 python data_processing/run_pipeline.py
 ```
@@ -141,27 +227,38 @@ $STORM_PETREL_WORKSPACE_DIR/clips/storm_petrel/
 $STORM_PETREL_WORKSPACE_DIR/clips/not_storm_petrel/
 $STORM_PETREL_WORKSPACE_DIR/binary_labels.csv
 $STORM_PETREL_WORKSPACE_DIR/nested_cv_folds.csv
+$STORM_PETREL_WORKSPACE_DIR/fold_balance_report.csv
 $STORM_PETREL_WORKSPACE_DIR/nested_cv_datasets/outer_01 ... outer_05
 ```
 
-The fold split uses `StratifiedGroupKFold`:
+The selected dataset contains 1,000 Storm Petrel clips and 1,000 negative clips. The negative class contains 500 environment-noise and 500 other-bird clips. Selection maximizes positive confidence subject to these constraints:
 
-- `target_label` is used for stratification
+- every selected three-second window from the same recording is non-overlapping
+- each `source_file` contributes the same number of positive and negative clips
+- each `source_file` contributes at most 73 clips per class
+- each of the four configured negative labels contributes exactly 250 clips
+
+The 73-pair source limit ensures that three maximum-sized source groups still fit inside the largest permitted outer test fold (`3 * 73 * 2 = 438`).
+
+Fold assignment uses deterministic mixed-integer optimization:
+
 - `source_file` is used as the grouping key
 - the same `source_file` will not appear in both train and held-out test for the same outer fold
-- exact class balance is not guaranteed because a `source_file` is never split across folds
+- every outer and inner train, validation, and test partition contains exactly 50% positive clips
+- held-out fold sizes must be within 10% of their ideal size
+- held-out sample counts are optimized toward equal fold distributions
 
-The script prints fold quality information such as positive count, negative count, total samples, source file count, and positive ratio. If a fold has only one class, the script fails.
+Candidate availability and fold feasibility are checked before old generated clips are removed. If 1,000 balanced non-overlapping pairs cannot be selected, or grouped folds cannot meet the constraints, the pipeline stops with an error. Successful runs write the statistics to `fold_balance_report.csv`.
 
 ## Rebuilding Folds From Existing Clips
 
 If clips and `binary_labels.csv` already exist but original full recordings are not available locally, you can rebuild only the folds and BirdNET folder layout:
 
 ```bash
-python -c "import csv, sys; from pathlib import Path; sys.path.insert(0, str(Path('scripts/data_processing').resolve())); import prepare_dataset, build_birdnet_fold_dataset; rows=list(csv.DictReader(open(prepare_dataset.BINARY_LABELS_PATH, newline='', encoding='utf-8'))); prepare_dataset.write_folds(rows); build_birdnet_fold_dataset.main()"
+python -c "import csv, sys; from pathlib import Path; sys.path.insert(0, str(Path('data_processing').resolve())); import prepare_dataset, build_birdnet_fold_dataset; rows=list(csv.DictReader(open(prepare_dataset.BINARY_LABELS_PATH, newline='', encoding='utf-8'))); prepare_dataset.write_folds(rows); build_birdnet_fold_dataset.main()"
 ```
 
-This is useful for validating split logic, but full data preparation from raw recordings still requires `STORM_PETREL_AUDIO_ROOT`.
+This is useful for validating split logic, but every source in the existing labels must already contain equal positive and negative counts. Full data preparation from raw recordings still requires `STORM_PETREL_AUDIO_ROOT`.
 
 ## Model Training
 
@@ -170,16 +267,24 @@ Run full nested-CV training after data processing has created `nested_cv_dataset
 Windows example:
 
 ```powershell
-$env:STORM_PETREL_MODEL_ROOT="D:\Users\93508\Documents\StromPetrels\workspace\models\nested_cv_stratified"
-D:\Users\93508\anaconda3\envs\strompetrel\python.exe scripts\model_training\run_nested_cv.py --outer-folds 01 02 03 04 05 --epochs 50 --threads 8
+$env:STORM_PETREL_PROJECT_ROOT="D:\Users\93508\Documents\StromPetrels"
+$env:STORM_PETREL_WORKSPACE_DIR="$env:STORM_PETREL_PROJECT_ROOT\workspace"
+$env:STORM_PETREL_MODEL_ROOT="$env:STORM_PETREL_WORKSPACE_DIR\models\nested_cv_balanced"
+D:\Users\93508\anaconda3\envs\strompetrel\python.exe model_training\run_nested_cv.py --outer-folds 01 02 03 04 05 --epochs 50 --threads 8
 ```
 
 Linux/server example:
 
 ```bash
-export STORM_PETREL_MODEL_ROOT=/mnt/home/alyzw89/working/workspace/models/nested_cv_stratified
+cd /mnt/home/alyzw89/working
+export STORM_PETREL_PROJECT_ROOT=/mnt/home/alyzw89/working
+export STORM_PETREL_WORKSPACE_DIR="$STORM_PETREL_PROJECT_ROOT/workspace"
+export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_balanced"
+
 python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05 --epochs 50 --threads 8
 ```
+
+Use a new model directory for the balanced dataset. Do not point this run at the legacy `nested_cv_stratified` directory: existing `metrics.csv` files can skip folds, and existing `.npz` caches contain embeddings from the earlier dataset.
 
 Important options:
 
@@ -204,6 +309,93 @@ outer_05/...
 ```
 
 The script also sets `NUMBA_CACHE_DIR`, `TMP`, and `TEMP` under the workspace to avoid Windows temp/cache issues during audio loading and BirdNET training.
+
+## Deployment Model and Long-recording Detection
+
+Train one deployment classifier from all 1,000 positive and 1,000 negative clips with the selected numeric best hyperparameters:
+
+```bash
+python model_training/train_deployment_model.py --epochs 50 --threads 8
+```
+
+The fixed settings are learning rate `0.0001`, 256 hidden units, dropout `0.3`, batch size 32, and a random 20% internal validation split. `STORM_PETREL_DEPLOYMENT_MODEL_DIR` receives `model.tflite`, its labels and parameter/sample-count files, and `training_config.json`. Existing output is only replaced with `--force`.
+
+Recursively scan long WAV/FLAC recordings in non-overlapping three-second windows and extract
+high-confidence candidates:
+
+```bash
+python long_recording_analysis/run_pipeline.py \
+  /path/to/long_recordings \
+  --run-name all_recordings_step3 \
+  --threshold 0.80
+```
+
+Both the default window and step are three seconds. A final tail shorter than three seconds is ignored.
+Every thresholded window becomes one
+strictly three-second, 48 kHz mono candidate; adjacent hits are not merged and no context is added.
+`detections.csv` retains its established columns with `window_count=1`. Runs produced by the earlier
+1.5-second stepping workflow are not converted automatically: use a new run name and rescan.
+
+Changing the threshold does not repeat inference. Re-run extraction against the saved scores:
+
+```bash
+python long_recording_analysis/extract_candidates.py \
+  workspace/long_recording_analysis/all_recordings_step3/all_windows.csv \
+  --threshold 0.80 \
+  --force
+```
+
+## Adult-proxy versus chick-proxy comparison
+
+The `comp_chick_adult` workflow runs independently from general long-recording detection and compares
+high-confidence model hits using date proxies:
+`adult_proxy` is on or before 2021-05-31, `chick_proxy` is on or after 2021-07-23, and the intervening
+incubation period is excluded. It can scan the raw recordings directly:
+
+```bash
+python comp_chick_adult/run_analysis.py \
+  --recordings-dir /mnt/home/alyzw89/data/2021/recordings \
+  --analysis-name adult_proxy_vs_chick_proxy \
+  --threshold 0.80 \
+  --adult-proxy-end 2021-05-31 \
+  --chick-proxy-start 2021-07-23
+```
+
+Before inference, filenames are date-filtered so only adult- and chick-proxy recordings are scanned.
+Transition-period and unparseable filenames are
+recorded under `scan/excluded_recordings.csv` without consuming model inference. Non-overlapping
+three-second scores and their configuration are cached under `scan/`; later runs reuse a matching cache
+and automatically refresh derived analysis outputs. If the recordings, model, or date boundaries change,
+the script stops and asks for an explicit `--rescan`.
+
+Existing scores remain supported without invoking the independent scanner:
+
+```bash
+python comp_chick_adult/run_analysis.py \
+  workspace/long_recording_analysis/RUN_NAME/all_windows.csv \
+  --analysis-name adult_proxy_vs_chick_proxy \
+  --threshold 0.80
+```
+
+One or more CSVs may be supplied, and a directory input is searched recursively for `all_windows.csv`.
+The script deduplicates by recording and start time, reads complete windows from the original recording,
+converts them to 48 kHz mono, and never lowers the requested threshold automatically.
+
+Outputs are written below
+`workspace/comp_chick_adult/adult_proxy_vs_chick_proxy/`: `scan/`, `analysis_windows.csv`,
+`recording_summary.csv`, `feature_comparison.csv`, `threshold_yield.csv`, `excluded_windows.csv`,
+`analysis_report.md`, `representative_audio/`, and `figures/`. Formal feature analysis uses only the
+configured threshold (default 0.80); the yield table separately reports 0.20, 0.50, and 0.80. Features
+are summarized per recording before Mann–Whitney U, Cliff's delta, recording-level bootstrap intervals,
+and BH-FDR. With fewer than two independent recordings in either phase, only descriptive statistics are
+reported.
+
+The model score is an uncalibrated sigmoid output: 0.80 is a high-confidence filter, not an 80%
+biological probability. The phase labels are date proxies rather than confirmed caller identities, so
+the report describes associations and does not make a causal breeding-stage claim. The default boundary
+dates are literature proxies informed by [UK bioacoustic research](https://pmc.ncbi.nlm.nih.gov/articles/PMC12336414/)
+and the [Skokholm breeding research archive](https://ora.ox.ac.uk/objects/uuid%3A24973c21-ab78-42f1-a3c1-a7665b776bbf);
+override them when site-specific 2021 field records are available.
 
 ## Result Summary
 
@@ -241,8 +433,8 @@ cd /mnt/home/alyzw89/working
 export STORM_PETREL_PROJECT_ROOT=/mnt/home/alyzw89/working
 export STORM_PETREL_DB_PATH=/mnt/home/alyzw89/data/2021/storm_petrel_2021_full.db
 export STORM_PETREL_AUDIO_ROOT=/mnt/home/alyzw89/data/2021/recordings
-export STORM_PETREL_WORKSPACE_DIR=/mnt/home/alyzw89/working/workspace
-export STORM_PETREL_MODEL_ROOT=/mnt/home/alyzw89/working/workspace/models/nested_cv_stratified
+export STORM_PETREL_WORKSPACE_DIR="$STORM_PETREL_PROJECT_ROOT/workspace"
+export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_balanced"
 
 python data_processing/run_pipeline.py
 python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05 --epochs 50 --threads 8
@@ -256,15 +448,8 @@ python model_training/run_nested_cv.py --outer-folds 04 --epochs 5 --threads 4
 python results_analysis/summarize_nested_cv.py
 ```
 
-## Current Local Notes
+## Current Data Notes
 
-On the current Windows workspace, original full recordings are not under the default `download/data` folder. The existing `workspace/clips` and `workspace/binary_labels.csv` are available, and the latest stratified training results were written to:
+The current generated dataset contains 1,000 positive and 1,000 negative clips with exactly balanced grouped folds. Train new models under `workspace/models/nested_cv_balanced`.
 
-```text
-workspace/models/nested_cv_stratified
-```
-
-For a true end-to-end data rebuild on a server, set `STORM_PETREL_AUDIO_ROOT` to the real folder containing full recordings.
-
-
-
+`workspace/models/nested_cv_stratified`, when present, contains legacy results and caches from the earlier 500-positive/1,000-negative dataset. Do not reuse that directory for the balanced run.

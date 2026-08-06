@@ -3,6 +3,8 @@
 .codex/
 .idea/
 .vscode/
+.env
+.env.local
 
 # Python caches and environments
 __pycache__/

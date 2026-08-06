@@ -1,0 +1,21 @@
+name: strompetrel
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg
+  - libsndfile
+  - ipykernel
+  - jupyterlab
+  - librosa
+  - matplotlib
+  - numpy
+  - pandas
+  - scikit-learn
+  - "scipy>=1.11"
+  - pysoundfile
+  - pip:
+      - "birdnet-analyzer[train]==2.4.0"

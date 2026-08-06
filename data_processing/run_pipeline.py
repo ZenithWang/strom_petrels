@@ -18,8 +18,8 @@ import build_birdnet_fold_dataset
 import prepare_dataset
 from project_config import PROJECT_ROOT, print_config
 
-TRAINING_SCRIPT = PROJECT_ROOT / "scripts" / "model_training" / "run_nested_cv.py"
-ANALYSIS_SCRIPT = PROJECT_ROOT / "scripts" / "results_analysis" / "summarize_nested_cv.py"
+TRAINING_SCRIPT = PROJECT_ROOT / "model_training" / "run_nested_cv.py"
+ANALYSIS_SCRIPT = PROJECT_ROOT / "results_analysis" / "summarize_nested_cv.py"
 
 
 def run_step(name: str, action) -> None:

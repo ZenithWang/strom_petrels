@@ -16,7 +16,7 @@ SCRIPTS_DIR = SCRIPT_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from project_config import DATASET_ROOT, FOLDS_PATH, MODEL_ROOT, NUMBA_CACHE_DIR, PROJECT_ROOT, TMP_DIR, print_config
+from project_config import DATASET_ROOT, FOLDS_PATH, MODEL_ROOT, NUMBA_CACHE_DIR, PROJECT_ROOT, TMP_DIR
 SAMPLE_RATE = 48_000
 SAMPLE_LENGTH = SAMPLE_RATE * 3
 POSITIVE_CLASS = "storm_petrel"
@@ -372,13 +372,13 @@ def main() -> None:
     args = parse_args()
     configure_windows_cache()
     outer_folds = [normalize_fold(value) for value in args.outer_folds]
-    validate_inputs(outer_folds)
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Dataset root: {DATASET_ROOT}")
     print(f"Model root: {MODEL_ROOT}")
     print(f"Available outer folds: {available_outer_folds()}")
     print(f"Requested outer folds: {outer_folds}")
     print(f"Epochs: {args.epochs}; threads: {args.threads}")
+    validate_inputs(outer_folds)
     for outer_fold in outer_folds:
         print()
         print(f"=== Running outer fold {outer_fold} ===")
@@ -390,8 +390,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

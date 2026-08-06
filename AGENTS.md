@@ -13,10 +13,12 @@ Current binary task:
 ## Repository Structure
 
 - `README.md` and `README_zh.md`: user-facing project documentation
-- `scripts/project_config.py`: shared path configuration for local and server runs
-- `scripts/data_processing/`: reproducible data preparation scripts
-- `scripts/model_training/`: nested-CV training scripts and training notebook
-- `scripts/results_analysis/`: result summarization scripts and analysis notebook
+- `project_config.py`: shared path configuration for local and server runs
+- `data_processing/`: reproducible data preparation scripts
+- `model_training/`: nested-CV training scripts and training notebook
+- `long_recording_analysis/`: deployment-model inference over long recordings
+- `comp_chick_adult/`: independent adult/chick date-proxy comparison
+- `results_analysis/`: result summarization scripts and analysis notebook
 - `notebooks/`: exploratory/reporting notebooks kept for inspection
 - `documents/`: project documentation and writeups
 - `workspace/`: generated clips, folds, model outputs, predictions, summaries, caches, and other local artifacts
@@ -30,7 +32,7 @@ The reproducible workflow is script-based. Treat notebooks as inspection/reporti
 - Keep `workspace/`, `archive/`, `.codex/`, `.agents/`, `.idea/`, Python caches, and IDE state out of Git.
 - Keep data processing, model training, and result analysis separated by directory.
 - Prefer editing existing scripts in place rather than creating duplicate or alternate versions.
-- Do not hard-code machine-specific paths inside scripts. Use `scripts/project_config.py` and environment variables.
+- Do not hard-code machine-specific paths inside scripts. Use `project_config.py` and environment variables.
 - Preserve existing notebook structure unless the user explicitly asks for a rewrite.
 - Be clear whether a check was structural validation, a smoke test, or a full end-to-end run.
 
@@ -58,7 +60,7 @@ If audio processing appears to hang on Windows, first check cache and temporary 
 
 ## Path Configuration
 
-All main scripts read paths from `scripts/project_config.py`. Environment variables can override defaults.
+All main scripts read paths from the root-level `project_config.py`. Local and server layouts are physically identical. Environment variables can override defaults.
 
 Important variables:
 
@@ -70,7 +72,7 @@ Important variables:
 
 Default local paths are resolved relative to the repository:
 
-- Database: `scripts/data_processing/storm_petrel_2021_full.db`
+- Database: `data_processing/storm_petrel_2021_full.db`
 - Audio root: `download/data`
 - Workspace: `workspace`
 - Model root: `workspace/models/nested_cv`
@@ -82,19 +84,19 @@ Every script prints resolved paths at startup. Check those lines first when debu
 Run data preparation from the repository root:
 
 ```powershell
-D:\Users\93508\anaconda3\envs\strompetrel\python.exe scripts\data_processing\run_pipeline.py
+D:\Users\93508\anaconda3\envs\strompetrel\python.exe data_processing\run_pipeline.py
 ```
 
 Run nested cross-validation training:
 
 ```powershell
-D:\Users\93508\anaconda3\envs\strompetrel\python.exe scripts\model_training\run_nested_cv.py
+D:\Users\93508\anaconda3\envs\strompetrel\python.exe model_training\run_nested_cv.py
 ```
 
 Summarize nested-CV results:
 
 ```powershell
-D:\Users\93508\anaconda3\envs\strompetrel\python.exe scripts\results_analysis\summarize_nested_cv.py
+D:\Users\93508\anaconda3\envs\strompetrel\python.exe results_analysis\summarize_nested_cv.py
 ```
 
 When running on a server, use the server Python environment that has the required packages installed and set the `STORM_PETREL_*` environment variables before running scripts.
@@ -136,8 +138,8 @@ For script changes, run the smallest relevant command first. Prefer targeted che
 Suggested checks:
 
 - For path/config changes, run the relevant script far enough to inspect printed resolved paths.
-- For data-processing changes, run `scripts\data_processing\run_pipeline.py` only when required inputs are available.
+- For data-processing changes, run `data_processing\run_pipeline.py` only when required inputs are available.
 - For training changes, avoid claiming final model quality unless training and evaluation actually ran.
-- For result-analysis changes, run `scripts\results_analysis\summarize_nested_cv.py` against existing model outputs when available.
+- For result-analysis changes, run `results_analysis\summarize_nested_cv.py` against existing model outputs when available.
 
 When reporting results, state what actually ran and what did not run.

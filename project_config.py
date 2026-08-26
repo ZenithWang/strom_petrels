@@ -1,3 +1,5 @@
+"""集中解析本地与服务器共用的项目路径配置。"""
+
 from __future__ import annotations
 
 import os
@@ -72,11 +74,17 @@ COMP_CHICK_ADULT_DIR = _path_from_env(
     "STORM_PETREL_COMP_CHICK_ADULT_DIR",
     WORKSPACE_DIR / "comp_chick_adult",
 )
+CHICK_SCREENING_DIR = _path_from_env(
+    "STORM_PETREL_CHICK_SCREENING_DIR",
+    WORKSPACE_DIR / "chick_screening",
+)
 NUMBA_CACHE_DIR = WORKSPACE_DIR / "numba_cache"
 TMP_DIR = WORKSPACE_DIR / "tmp"
 
 
 def print_config() -> None:
+    """打印当前进程实际解析出的全部关键路径。"""
+
     rows = [
         ("PROJECT_ROOT", PROJECT_ROOT),
         ("DB_PATH", DB_PATH),
@@ -90,6 +98,7 @@ def print_config() -> None:
         ("DEPLOYMENT_MODEL_DIR", DEPLOYMENT_MODEL_DIR),
         ("LONG_RECORDING_ANALYSIS_DIR", LONG_RECORDING_ANALYSIS_DIR),
         ("COMP_CHICK_ADULT_DIR", COMP_CHICK_ADULT_DIR),
+        ("CHICK_SCREENING_DIR", CHICK_SCREENING_DIR),
         ("NUMBA_CACHE_DIR", NUMBA_CACHE_DIR),
         ("TMP_DIR", TMP_DIR),
     ]

@@ -1,3 +1,5 @@
+"""把 WAV/FLAC 长录音按完整三秒窗口送入部署 TFLite 模型。"""
+
 from __future__ import annotations
 
 import argparse
@@ -31,6 +33,8 @@ CSV_FIELDS = ["recording", "start_seconds", "end_seconds", "raw_logit", "probabi
 
 @dataclass(frozen=True)
 class AudioWindow:
+    """保存一个待评分窗口的来源、时间边界和波形。"""
+
     recording: Path
     start_seconds: float
     end_seconds: float
@@ -38,10 +42,17 @@ class AudioWindow:
 
 
 class BatchPredictor(Protocol):
-    def predict(self, batch: np.ndarray) -> np.ndarray: ...
+    """定义长录音扫描器需要的批量预测接口。"""
+
+    def predict(self, batch: np.ndarray) -> np.ndarray:
+        """返回输入批次中每个窗口的 storm-petrel logit。"""
+
+        ...
 
 
 def sigmoid(value: float) -> float:
+    """以数值稳定方式把单个 logit 转为 sigmoid 分数。"""
+
     if value >= 0:
         return 1.0 / (1.0 + math.exp(-value))
     exp_value = math.exp(value)
@@ -49,10 +60,14 @@ def sigmoid(value: float) -> float:
 
 
 def labels_path_for_model(model_path: Path) -> Path:
+    """返回 BirdNET TFLite 模型对应的标签文件路径。"""
+
     return model_path.with_name(f"{model_path.stem}_Labels.txt")
 
 
 class TFLitePredictor:
+    """封装 BirdNET TFLite 解释器并输出 storm-petrel logits。"""
+
     def __init__(self, model_path: Path) -> None:
         if not model_path.is_file():
             raise FileNotFoundError(f"Deployment model not found: {model_path}")
@@ -77,6 +92,8 @@ class TFLitePredictor:
             raise ValueError(f"Expected float32 model input, got {self.input_detail['dtype']}")
 
     def predict(self, batch: np.ndarray) -> np.ndarray:
+        """验证批次形状并执行一次 TFLite 批量推理。"""
+
         batch = np.asarray(batch, dtype=np.float32)
         if batch.ndim != 2 or batch.shape[1] != SAMPLE_LENGTH:
             raise ValueError(f"Expected batch shape [n, {SAMPLE_LENGTH}], got {batch.shape}")
@@ -93,6 +110,8 @@ class TFLitePredictor:
 
 
 def find_recordings(input_root: Path) -> list[Path]:
+    """递归查找支持的 WAV/FLAC 录音并返回确定性排序。"""
+
     if not input_root.is_dir():
         raise NotADirectoryError(f"Long-recording input directory not found: {input_root}")
     return sorted(
@@ -115,6 +134,8 @@ def _resample_window(audio: np.ndarray, source_rate: int) -> np.ndarray:
 
 
 def iter_audio_windows(path: Path, step_seconds: float = DEFAULT_STEP_SECONDS) -> Iterator[AudioWindow]:
+    """依次产生完整窗口，并忽略不足三秒的录音尾部。"""
+
     if step_seconds <= 0:
         raise ValueError("step_seconds must be greater than zero")
     with sf.SoundFile(path) as source:
@@ -166,6 +187,8 @@ def scan_recording_paths(
     force: bool = False,
     predictor: BatchPredictor | None = None,
 ) -> int:
+    """扫描给定录音列表，并把每个窗口分数写入 CSV。"""
+
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
     if not recordings:
@@ -204,6 +227,8 @@ def scan_recordings(
     force: bool = False,
     predictor: BatchPredictor | None = None,
 ) -> int:
+    """发现输入目录中的录音并运行流式扫描。"""
+
     recordings = find_recordings(input_root)
     if not recordings:
         raise FileNotFoundError(f"No recursive WAV/FLAC inputs found under {input_root}")
@@ -219,6 +244,8 @@ def scan_recordings(
 
 
 def parse_args() -> argparse.Namespace:
+    """解析仅推理模式的输入、模型和批处理选项。"""
+
     parser = argparse.ArgumentParser(description="Stream WAV/FLAC recordings through a deployment TFLite model.")
     parser.add_argument("input_dir", type=Path)
     parser.add_argument("--output-csv", type=Path, required=True)
@@ -230,6 +257,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """运行长录音评分命令行入口。"""
+
     args = parse_args()
     print_config()
     scan_recordings(

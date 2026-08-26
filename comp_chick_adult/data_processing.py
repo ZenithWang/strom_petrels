@@ -1,3 +1,5 @@
+"""发现日期代理录音、维护扫描缓存并提取窗口级声学特征。"""
+
 from __future__ import annotations
 
 # Data preparation and acoustic feature extraction for the comparison workflow.
@@ -70,6 +72,8 @@ SCAN_CONFIG_VERSION = 1
 
 
 def parse_iso_date(value: str) -> date:
+    """把 ISO 日期参数解析为 date，并提供适合 CLI 的错误信息。"""
+
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
@@ -77,12 +81,16 @@ def parse_iso_date(value: str) -> date:
 
 
 def validate_name(value: str) -> str:
+    """验证安全的分析输出名称。"""
+
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value):
         raise ValueError("analysis_name may contain only letters, digits, dots, underscores, and hyphens")
     return value
 
 
 def discover_csvs(inputs: Sequence[Path]) -> list[Path]:
+    """从文件或目录参数中发现并去重 all_windows.csv。"""
+
     csvs: set[Path] = set()
     for raw_path in inputs:
         path = raw_path.expanduser().resolve()
@@ -98,6 +106,8 @@ def discover_csvs(inputs: Sequence[Path]) -> list[Path]:
 
 
 def parse_recording_date(recording: Path) -> date | None:
+    """从录音文件名中提取可识别的录制日期。"""
+
     match = DATE_PATTERN.search(recording.stem)
     if not match:
         return None
@@ -112,6 +122,8 @@ def classify_phase(
     adult_proxy_end: date,
     chick_proxy_start: date,
 ) -> str | None:
+    """根据边界把录音日期分为 adult、chick 或排除阶段。"""
+
     if adult_proxy_end >= chick_proxy_start:
         raise ValueError("adult_proxy_end must be earlier than chick_proxy_start")
     if recording_date <= adult_proxy_end:
@@ -126,6 +138,8 @@ def select_proxy_recordings(
     adult_proxy_end: date,
     chick_proxy_start: date,
 ) -> tuple[list[Path], pd.DataFrame, list[Path]]:
+    """选择两个代理阶段的录音，并记录排除原因和完整清单。"""
+
     all_recordings = find_recordings(recordings_dir)
     if not all_recordings:
         raise FileNotFoundError(f"No recursive WAV/FLAC inputs found under {recordings_dir}")
@@ -216,6 +230,8 @@ def build_scan_config(
     adult_proxy_end: date,
     chick_proxy_start: date,
 ) -> dict[str, object]:
+    """构建用于判断扫描缓存是否可复用的稳定配置。"""
+
     return {
         "scan_config_version": SCAN_CONFIG_VERSION,
         "recordings_dir": str(recordings_dir),
@@ -242,6 +258,8 @@ def prepare_scan_cache(
     rescan: bool,
     predictor: BatchPredictor | None = None,
 ) -> tuple[Path, pd.DataFrame, bool]:
+    """复用匹配的扫描缓存，或显式重建日期过滤后的窗口分数。"""
+
     recordings_dir = recordings_dir.expanduser().resolve()
     model_path = model_path.expanduser().resolve()
     selected, excluded_recordings, all_recordings = select_proxy_recordings(
@@ -307,6 +325,8 @@ def prepare_scan_cache(
 
 
 def load_audio_window(recording: Path, start_seconds: float) -> np.ndarray:
+    """读取并重采样一个完整三秒窗口；不接受不完整来源。"""
+
     with sf.SoundFile(recording) as source:
         source_rate = int(source.samplerate)
         start_frame = int(round(start_seconds * source_rate))
@@ -325,6 +345,8 @@ def load_audio_window(recording: Path, start_seconds: float) -> np.ndarray:
 
 
 def compute_features(audio: np.ndarray) -> tuple[dict[str, float], np.ndarray]:
+    """计算一个三秒窗口的声学特征和 log-mel 频谱。"""
+
     audio = np.asarray(audio, dtype=np.float32)
     rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
     magnitude = np.abs(librosa.stft(audio, n_fft=2048, hop_length=512, center=False))
@@ -390,7 +412,7 @@ def validate_windows(
     adult_proxy_end: date,
     chick_proxy_start: date,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, list[np.ndarray]]]:
-    """Return high-confidence feature rows, all eligible rows, exclusions, and log-mels."""
+    """校验、去重、分期并返回高分窗口、合格窗口、排除项和频谱。"""
     included: list[dict[str, object]] = []
     eligible: list[dict[str, object]] = []
     excluded: list[dict[str, object]] = []

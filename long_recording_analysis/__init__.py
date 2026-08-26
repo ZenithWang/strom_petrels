@@ -1,1 +1,1 @@
-"""Streaming inference and candidate extraction for long recordings."""
+"""提供长录音流式推理和候选音频截取功能。"""

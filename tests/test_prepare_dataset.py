@@ -6,6 +6,7 @@ import unittest
 from collections import Counter
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -182,6 +183,43 @@ class SampleSelectionTests(unittest.TestCase):
             self.assertRaisesRegex(prepare_dataset.SampleSelectionError, "infeasible"),
         ):
             prepare_dataset.select_samples()
+
+    def test_selection_rejects_feasible_solution_not_proven_optimal(self) -> None:
+        targets = (
+            {
+                "db_label": "positive",
+                "count": 1,
+                "label": "storm_petrel",
+                "target_label": "1",
+                "negative_type": "",
+            },
+            {
+                "db_label": "negative",
+                "count": 1,
+                "label": "not_storm_petrel",
+                "target_label": "0",
+                "negative_type": "other_bird",
+            },
+        )
+        positive_pool = {"recording.wav": [candidate(0)]}
+        negative_pool = {
+            "recording.wav": [
+                candidate(3, db_label="negative", target_label="0", negative_type="other_bird")
+            ]
+        }
+        timed_out = SimpleNamespace(
+            success=True,
+            status=1,
+            x=[1.0, 1.0],
+            fun=-1.0,
+            message="Time limit reached with a feasible incumbent",
+        )
+        with (
+            patch.object(prepare_dataset, "LABEL_TARGETS", targets),
+            patch.object(prepare_dataset, "milp", return_value=timed_out),
+            self.assertRaisesRegex(prepare_dataset.SampleSelectionError, "proven optimum.*status=1"),
+        ):
+            prepare_dataset.optimize_balanced_selection(positive_pool, negative_pool)
 
 
 class FoldAssignmentTests(unittest.TestCase):

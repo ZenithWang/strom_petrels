@@ -1,3 +1,5 @@
+"""使用全部平衡 clips 训练用于长录音推理的部署模型。"""
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +35,8 @@ BATCH_SIZE = "32"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析部署模型训练参数。"""
+
     parser = argparse.ArgumentParser(description="Train the all-clips BirdNET deployment classifier.")
     parser.add_argument("--epochs", type=int, default=os.environ.get("BIRDNET_EPOCHS", "50"))
     parser.add_argument("--threads", type=int, default=os.environ.get("BIRDNET_THREADS", "8"))
@@ -45,6 +49,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def configure_cache() -> None:
+    """把训练缓存和临时文件目录固定到 workspace。"""
+
     NUMBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["NUMBA_CACHE_DIR"] = str(NUMBA_CACHE_DIR)
@@ -53,6 +59,8 @@ def configure_cache() -> None:
 
 
 def count_training_clips(clips_dir: Path = CLIPS_DIR) -> dict[str, int]:
+    """验证两个类别目录并统计严格平衡的训练 clips。"""
+
     counts: dict[str, int] = {}
     for class_name in CLASS_NAMES:
         class_dir = clips_dir / class_name
@@ -71,6 +79,8 @@ def count_training_clips(clips_dir: Path = CLIPS_DIR) -> dict[str, int]:
 
 
 def training_command(epochs: int, threads: int) -> list[str]:
+    """构建 BirdNET-Analyzer 部署模型训练命令。"""
+
     output_prefix = DEPLOYMENT_MODEL_DIR / "model"
     cache_file = DEPLOYMENT_MODEL_DIR / "training_cache.npz"
     return [
@@ -106,6 +116,8 @@ def training_command(epochs: int, threads: int) -> list[str]:
 
 
 def validate_artifacts(output_dir: Path = DEPLOYMENT_MODEL_DIR) -> None:
+    """确认训练过程生成了部署所需的全部模型文件。"""
+
     required = [
         output_dir / "model.tflite",
         output_dir / "model_Labels.txt",
@@ -118,6 +130,8 @@ def validate_artifacts(output_dir: Path = DEPLOYMENT_MODEL_DIR) -> None:
 
 
 def train(epochs: int, threads: int, force: bool = False) -> None:
+    """验证输入、训练部署模型并记录完整配置。"""
+
     if not 1 <= epochs <= 50:
         raise ValueError("epochs must be between 1 and the configured maximum of 50")
     if threads <= 0:
@@ -162,6 +176,8 @@ def train(epochs: int, threads: int, force: bool = False) -> None:
 
 
 def main() -> None:
+    """运行部署模型训练命令行入口。"""
+
     args = parse_args()
     configure_cache()
     print_config()

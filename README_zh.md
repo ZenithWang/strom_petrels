@@ -21,6 +21,7 @@ model_training/run_nested_cv.py           nested CV 训练和评估脚本
 model_training/train_deployment_model.py
 long_recording_analysis/                  长录音流式推理与候选截取
 comp_chick_adult/                         成鸟/雏鸟日期代理声学比较
+chick_screening/                          双模型雏鸟叫声探索性筛选
 results_analysis/summarize_nested_cv.py
 workspace/                                生成的 clips、folds、模型输出和汇总结果
 ```
@@ -158,6 +159,7 @@ export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_bal
 export STORM_PETREL_DEPLOYMENT_MODEL_DIR="$STORM_PETREL_WORKSPACE_DIR/models/deployment"
 export STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR="$STORM_PETREL_WORKSPACE_DIR/long_recording_analysis"
 export STORM_PETREL_COMP_CHICK_ADULT_DIR="$STORM_PETREL_WORKSPACE_DIR/comp_chick_adult"
+export STORM_PETREL_CHICK_SCREENING_DIR="$STORM_PETREL_WORKSPACE_DIR/chick_screening"
 ```
 
 含义：
@@ -170,6 +172,7 @@ export STORM_PETREL_COMP_CHICK_ADULT_DIR="$STORM_PETREL_WORKSPACE_DIR/comp_chick
 - `STORM_PETREL_DEPLOYMENT_MODEL_DIR`：使用全部 clips 训练的部署模型输出位置
 - `STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR`：长录音窗口分数、检测结果和候选 WAV 输出位置
 - `STORM_PETREL_COMP_CHICK_ADULT_DIR`：成鸟/雏鸟代理比较的表格、图、报告和代表音频输出位置
+- `STORM_PETREL_CHICK_SCREENING_DIR`：日期专用模型、双模型分数和雏鸟筛选分析输出位置
 
 如果不设置环境变量，默认路径相对于项目根目录解析：
 
@@ -181,6 +184,7 @@ MODEL_ROOT    = workspace/models/nested_cv
 DEPLOYMENT_MODEL_DIR = workspace/models/deployment
 LONG_RECORDING_ANALYSIS_DIR = workspace/long_recording_analysis
 COMP_CHICK_ADULT_DIR = workspace/comp_chick_adult
+CHICK_SCREENING_DIR = workspace/chick_screening
 ```
 
 训练脚本会在检查 fold 目录之前自动打印项目、数据集和模型输出路径。
@@ -196,6 +200,96 @@ COMP_CHICK_ADULT_DIR = workspace/comp_chick_adult
 ```
 
 `STORM_PETREL_AUDIO_ROOT` 需要能找到数据库里引用的录音文件。脚本会递归扫描目录，并按文件名或不带扩展名的 stem 匹配。
+
+## 从零开始完整运行
+
+所有命令都应从项目根目录执行。核心可复现管线和两个生物学研究分支共用路径配置，但输出彼此独立。
+
+### 1. 一次性配置环境和路径
+
+```bash
+conda env create -f environment.yml
+conda activate strompetrel
+cp .env.example .env
+# 编辑 .env，填写真实的数据库、录音、项目和 workspace 路径。
+python verify_environment.py
+```
+
+已有服务器环境可以改为执行 `conda activate strompetrel-birdnet`。每次新建或更新环境后，都应运行
+`python verify_environment.py`。
+
+### 2. 核心数据集、nested CV 和论文指标
+
+```bash
+python data_processing/run_pipeline.py
+python model_training/run_nested_cv.py \
+  --outer-folds 01 02 03 04 05 \
+  --epochs 50 \
+  --threads 8
+python results_analysis/summarize_nested_cv.py
+```
+
+这条完整路径会生成 2,000 个 clip 的二分类数据集、grouped nested-CV 模型、OOF 预测、错误汇总，
+以及表 5.3 使用的录音级 clustered bootstrap。
+
+### 3. 部署模型和长录音检测
+
+```bash
+python model_training/train_deployment_model.py --epochs 50 --threads 8
+python long_recording_analysis/run_pipeline.py \
+  /absolute/path/to/recordings \
+  --run-name deployment_scan \
+  --threshold 0.80 \
+  --batch-size 32
+```
+
+### 4. 独立的成鸟/雏鸟日期代理比较
+
+```bash
+python comp_chick_adult/run_analysis.py \
+  --recordings-dir /absolute/path/to/recordings \
+  --analysis-name adult_proxy_vs_chick_proxy \
+  --threshold 0.80 \
+  --adult-proxy-end 2021-05-31 \
+  --chick-proxy-start 2021-07-23 \
+  --bootstrap-iterations 5000 \
+  --seed 2021
+```
+
+该分支使用部署模型，并维护自己的日期过滤扫描缓存，所以不要求先运行第 3 步的通用长录音扫描。
+
+### 5. 探索性双模型雏鸟叫声筛选
+
+```bash
+python chick_screening/run_pipeline.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00" \
+  --recordings-dir /absolute/path/to/chick_proxy_recordings \
+  --epochs 50 \
+  --threads 8 \
+  --adult-threshold 0.80 \
+  --chick-threshold 0.80
+```
+
+这个独立分支会准备日期专用训练集、分别训练成鸟期和雏鸟期模型、用两个模型扫描相同录音，
+并分析分数差异。日期代理标签不能证明发声个体的真实年龄。
+
+### 执行顺序与断点重跑规则
+
+```text
+环境/路径配置
+    -> 数据准备
+        -> grouped nested-CV 训练 -> 结果汇总/表 5.3
+        -> 部署模型训练 -> 长录音扫描
+                        \-> 成鸟/雏鸟代理比较
+        -> 日期专用数据集 -> 两个日期模型 -> 双模型扫描 -> 雏鸟筛选分析
+```
+
+- 只有数据库、原始录音、筛选约束或 fold 逻辑改变时，才需要重新运行数据准备。
+- 已有 final nested-CV 模型而只需重建 outer 预测/指标时，使用 `--evaluate-only`。
+- 长录音只改变阈值时，只重跑候选截取，不需要再次推理。
+- 只有录音、模型或代理日期边界改变时，成鸟/雏鸟比较才需要 `--rescan`。
+- `--force` 会替换既有输出；执行前先核对脚本打印的目标路径。
 
 ## 数据处理
 
@@ -341,6 +435,8 @@ python long_recording_analysis/run_pipeline.py \
 3 秒、48 kHz 单声道候选；相邻命中不合并，
 也不添加上下文。`detections.csv` 保留原字段，且每行 `window_count=1`。旧的 1.5 秒步长结果
 不会自动转换，必须换一个新的 run name 重新扫描。
+Outer-CV 评估采用相同的完整窗口政策：测试 clip 不足 3 秒时直接报错，不做 padding，
+因为这意味着准备好的评估数据已经损坏或不完整。
 
 调整阈值不会重复模型推理，直接对保存的分数重新提取：
 
@@ -410,6 +506,8 @@ python results_analysis/summarize_nested_cv.py
 ```text
 $STORM_PETREL_MODEL_ROOT/nested_cv_summary.csv
 $STORM_PETREL_MODEL_ROOT/negative_type_error_summary.csv
+$STORM_PETREL_MODEL_ROOT/clustered_bootstrap_ci.csv
+$STORM_PETREL_MODEL_ROOT/model_metrics.tex
 ```
 
 `nested_cv_summary.csv` 包含每个 outer fold 的指标和 mean/std：
@@ -422,6 +520,109 @@ $STORM_PETREL_MODEL_ROOT/negative_type_error_summary.csv
 - AUROC
 
 `negative_type_error_summary.csv` 汇总负类子类型中的 false positives。
+`clustered_bootstrap_ci.csv` 和 `model_metrics.tex` 通过按来源录音整簇抽样 5,000 次（seed 2021），
+复现表 5.3 的 pooled 指标和 95% 置信区间。正式 bootstrap 要求五个 outer fold 的预测全部存在；
+若只是有意运行单 fold smoke test，请给汇总命令加 `--skip-clustered-bootstrap`。
+
+## 探索性双模型雏鸟筛选
+
+`chick_screening` 与上面的部署模型成鸟/雏鸟比较是两个不同流程。它分别用成鸟代理期和雏鸟代理期
+训练模型，然后对相同录音运行两个模型，并按分数划分四个象限。
+
+完整运行：
+
+```bash
+python chick_screening/run_pipeline.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00" \
+  --recordings-dir /path/to/chick_proxy_recordings \
+  --epochs 50 --threads 8
+```
+
+逐阶段运行：
+
+```bash
+# 准备两个日期阶段的数据集。
+python chick_screening/prepare_date_dataset.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00"
+
+# 训练两个日期专用模型。
+python chick_screening/train_date_models.py --epochs 50 --threads 8
+
+# 用两个模型扫描录音。
+python chick_screening/dual_model_scan.py /path/to/recordings \
+  --output-csv workspace/chick_screening/dual_scores.csv \
+  --batch-size 32
+
+# 复用已有分数重新分析，不重复扫描。
+python chick_screening/analyze_discrepancies.py \
+  --scores-csv workspace/chick_screening/dual_scores.csv \
+  --adult-threshold 0.80 \
+  --chick-threshold 0.80 \
+  --bootstrap-iterations 5000 \
+  --seed 2021
+```
+
+只需重建一个时期时，可在准备/训练命令中使用 `--adult-only` 或 `--chick-only`。完整输出目录和解释
+限制见 `chick_screening/README.md`。
+
+## 命令索引：单独运行每项功能
+
+下表列出全部生产命令入口。当前代码支持的准确参数始终以 `python <脚本> --help` 为准。
+
+| 功能 | 命令 | 主要输出 |
+|---|---|---|
+| 检查 Python 和依赖 | `python verify_environment.py` | 终端通过/失败报告 |
+| 预览/执行服务器同步 | `python sync_project.py USER@HOST:PATH [--apply] [--delete]` | 同步后的源码目录 |
+| 选样、截取 WAV、构建 folds 和数据集 | `python data_processing/run_pipeline.py` | `workspace/clips`、清单、folds、数据集 |
+| 只选样、截取并写 folds | `python data_processing/prepare_dataset.py` | clips 和 fold CSV |
+| 从 fold CSV 重建 BirdNET 目录 | `python data_processing/build_birdnet_fold_dataset.py` | `workspace/nested_cv_datasets` |
+| 训练/评估 nested CV | `python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05` | fold 模型、预测和指标 |
+| 复用 nested-CV 模型重新评估 | `python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05 --evaluate-only --force` | 刷新的预测和指标 |
+| 训练全 clips 部署模型 | `python model_training/train_deployment_model.py` | `workspace/models/deployment` |
+| 扫描长录音并截取候选 | `python long_recording_analysis/run_pipeline.py INPUT_DIR` | 命名的长录音运行目录 |
+| 只运行长录音推理 | `python long_recording_analysis/scan_long_recordings.py INPUT_DIR --output-csv FILE` | `all_windows.csv` |
+| 应用/更换阈值并导出 WAV | `python long_recording_analysis/extract_candidates.py ALL_WINDOWS_CSV` | detections CSV 和候选 WAV |
+| 从原始录音分析日期代理 | `python comp_chick_adult/run_analysis.py --recordings-dir INPUT_DIR` | 扫描缓存、表、图和报告 |
+| 从已有分数分析日期代理 | `python comp_chick_adult/run_analysis.py ALL_WINDOWS_CSV [...]` | 表、图和报告 |
+| 运行全部雏鸟筛选阶段 | `python chick_screening/run_pipeline.py --recordings-dir INPUT_DIR` | 日期数据集、模型、分数和分析 |
+| 准备雏鸟筛选数据集 | `python chick_screening/prepare_date_dataset.py` | 成鸟/雏鸟 clip 数据集 |
+| 训练雏鸟筛选模型 | `python chick_screening/train_date_models.py` | 成鸟/雏鸟 TFLite 模型 |
+| 运行双模型推理 | `python chick_screening/dual_model_scan.py INPUT_DIR` | `dual_scores.csv` |
+| 分析双模型分数 | `python chick_screening/analyze_discrepancies.py` | 象限表、图和报告 |
+| 汇总 nested CV 和表 5.3 | `python results_analysis/summarize_nested_cv.py` | 汇总 CSV 和 LaTeX 表 |
+
+## 验证、Smoke Test 与排错
+
+运行完整的轻量自动测试：
+
+```bash
+python -m pytest -q
+```
+
+不代表最终模型质量的快速 smoke test：
+
+```bash
+python model_training/run_nested_cv.py --outer-folds 04 --epochs 5 --threads 4
+python results_analysis/summarize_nested_cv.py --skip-clustered-bootstrap
+python chick_screening/run_pipeline.py --epochs 5 --threads 4 --skip-scan --skip-analysis
+```
+
+运行失败时优先检查：
+
+- 启动时打印的数据库、录音、workspace 和模型路径是否指向预期位置。
+- `python verify_environment.py` 是否通过，并显示 Python 3.11 和 BirdNET-Analyzer 2.4.0。
+- `STORM_PETREL_MODEL_ROOT` 是否为 `models/nested_cv_balanced`，而不是历史模型/cache 目录。
+- 正式 clustered bootstrap 前，五个 `outer_*/predictions.csv` 是否全部存在。
+- CV clips 是否为完整的 3 秒、48 kHz 文件；评估会有意拒绝 padding 短片段。
+- 长录音模型、文件清单或日期边界变化后，是否新建扫描或显式使用了 `--rescan`。
+- Windows 下 Numba 与临时目录是否位于 `workspace`；脚本会自动配置这些路径。
+
+## 生成文件与 Git
+
+不要提交数据库、录音、截取的 clips、缓存、训练模型或 `workspace/` 下的任何文件。只提交源码、
+轻量配置、用于检查的 notebook、README 和小型项目文档。`.gitignore` 已覆盖主要生成格式。
 
 ## 服务器完整运行示例
 
@@ -445,7 +646,7 @@ python results_analysis/summarize_nested_cv.py
 
 ```bash
 python model_training/run_nested_cv.py --outer-folds 04 --epochs 5 --threads 4
-python results_analysis/summarize_nested_cv.py
+python results_analysis/summarize_nested_cv.py --skip-clustered-bootstrap
 ```
 
 ## 当前数据状态

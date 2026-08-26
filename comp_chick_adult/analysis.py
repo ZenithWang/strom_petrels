@@ -1,3 +1,5 @@
+"""汇总日期代理窗口，并生成统计比较、图表、音频和报告。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -42,6 +44,8 @@ DERIVED_FILES = [
 
 
 def build_threshold_yield(eligible: pd.DataFrame) -> pd.DataFrame:
+    """统计预设阈值下两个日期阶段的候选窗口数量。"""
+
     rows: list[dict[str, object]] = []
     for threshold in YIELD_THRESHOLDS:
         for phase in PHASES:
@@ -63,6 +67,8 @@ def build_threshold_yield(eligible: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_recording_summary(included: pd.DataFrame, eligible: pd.DataFrame) -> pd.DataFrame:
+    """把窗口级特征汇总为每条录音、每个代理阶段的中位数。"""
+
     columns = [
         "recording",
         "recording_date",
@@ -105,6 +111,8 @@ def build_recording_summary(included: pd.DataFrame, eligible: pd.DataFrame) -> p
 
 
 def cliffs_delta(adult: np.ndarray, chick: np.ndarray) -> float:
+    """计算 chick-minus-adult 方向的 Cliff's delta。"""
+
     differences = chick[:, None] - adult[None, :]
     return float(
         (np.count_nonzero(differences > 0) - np.count_nonzero(differences < 0))
@@ -118,6 +126,8 @@ def bootstrap_median_difference(
     iterations: int,
     rng: np.random.Generator,
 ) -> tuple[float, float]:
+    """以录音为单位 bootstrap 两组中位数差的百分位区间。"""
+
     differences = np.empty(iterations, dtype=float)
     for index in range(iterations):
         adult_sample = rng.choice(adult, size=len(adult), replace=True)
@@ -144,6 +154,8 @@ def compare_features(
     bootstrap_iterations: int,
     seed: int,
 ) -> tuple[pd.DataFrame, bool]:
+    """计算特征差异、效应量、检验、bootstrap 区间和 BH-FDR。"""
+
     high_confidence_recordings = (
         recording_summary[recording_summary["high_confidence_window_count"] > 0]
         if not recording_summary.empty
@@ -216,6 +228,8 @@ def compare_features(
 def select_representatives(
     included: pd.DataFrame, phase: str, count: int
 ) -> pd.DataFrame:
+    """按分数为每个日期代理阶段选择代表窗口。"""
+
     if included.empty:
         return included
     candidates = included[included["phase"] == phase].sort_values(
@@ -232,6 +246,8 @@ def select_representatives(
 def export_representative_audio(
     included: pd.DataFrame, output_dir: Path, count: int
 ) -> pd.DataFrame:
+    """导出代表窗口的音频文件和可追踪清单。"""
+
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict[str, object]] = []
     for phase in PHASES:
@@ -282,6 +298,8 @@ def _save_empty_figure(path: Path, title: str, message: str) -> None:
 def plot_average_spectrograms(
     log_mels: dict[str, list[np.ndarray]], figures_dir: Path
 ) -> None:
+    """绘制两个代理阶段的平均 log-mel 频谱图。"""
+
     averages = {
         phase: np.mean(np.stack(values), axis=0) if values else None
         for phase, values in log_mels.items()
@@ -357,6 +375,8 @@ def plot_average_spectrograms(
 def plot_representative_spectrograms(
     manifest: pd.DataFrame, figures_dir: Path
 ) -> None:
+    """绘制已导出代表音频的频谱图面板。"""
+
     if manifest.empty:
         _save_empty_figure(
             figures_dir / "representative_spectrograms.png",
@@ -401,6 +421,8 @@ def plot_representative_spectrograms(
 def plot_feature_distributions(
     recording_summary: pd.DataFrame, figures_dir: Path
 ) -> None:
+    """绘制录音级声学特征分布。"""
+
     figure, axes = plt.subplots(3, 3, figsize=(14, 12))
     for axis, feature in zip(axes.ravel(), FEATURE_COLUMNS):
         values = [
@@ -425,6 +447,8 @@ def plot_feature_distributions(
 def plot_probability_distributions(
     eligible: pd.DataFrame, threshold: float, figures_dir: Path
 ) -> None:
+    """绘制两个代理阶段的模型分数分布。"""
+
     figure, axis = plt.subplots(figsize=(8, 4))
     for phase in PHASES:
         values = (
@@ -451,6 +475,8 @@ def plot_probability_distributions(
 
 
 def plot_date_activity(included: pd.DataFrame, figures_dir: Path) -> None:
+    """绘制纳入窗口随录音日期变化的活动图。"""
+
     if included.empty:
         _save_empty_figure(
             figures_dir / "date_activity.png",
@@ -498,6 +524,8 @@ def write_report(
     enough_recordings: bool,
     excluded_recordings: pd.DataFrame | None = None,
 ) -> None:
+    """写出包含输入、限制、统计和输出说明的 Markdown 报告。"""
+
     phase_windows = included.groupby("phase").size() if not included.empty else {}
     phase_recordings = (
         included.groupby("phase")["recording"].nunique() if not included.empty else {}
@@ -564,11 +592,12 @@ def write_report(
             "|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
+    def fmt(value: object) -> str:
+        """把报告中的数值统一格式化，并保留缺失标记。"""
+
+        return "" if pd.isna(value) else f"{float(value):.6g}"
+
     for _, row in comparison.iterrows():
-
-        def fmt(value: object) -> str:
-            return "" if pd.isna(value) else f"{float(value):.6g}"
-
         lines.append(
             f"| {row['feature']} | {int(row['adult_recording_count'])} | {fmt(row['adult_median'])} | "
             f"{int(row['chick_recording_count'])} | {fmt(row['chick_median'])} | "
@@ -595,6 +624,8 @@ def write_report(
 
 
 def refresh_derived_output_directories(output_dir: Path) -> tuple[Path, Path]:
+    """重建可再生的图表和代表音频目录，同时保留扫描缓存。"""
+
     output_dir.mkdir(parents=True, exist_ok=True)
     for filename in DERIVED_FILES:
         path = output_dir / filename

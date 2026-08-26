@@ -1,3 +1,5 @@
+"""把 fold 清单物化为 BirdNET-Analyzer 要求的类别目录结构。"""
+
 from __future__ import annotations
 
 import sys
@@ -76,6 +78,8 @@ def build_all_fold_datasets(folds_path: Path = FOLDS_PATH, output_root: Path = O
 
 
 def main() -> None:
+    """构建全部 outer/inner fold 数据集并打印计数。"""
+
     print_config()
     results = build_all_fold_datasets()
     print(f"已写出 nested CV BirdNET 数据集目录 {OUTPUT_ROOT}")

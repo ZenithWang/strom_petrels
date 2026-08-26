@@ -1,3 +1,5 @@
+"""从检测数据库构建平衡三秒 clips，并生成 grouped nested-CV fold 方案。"""
+
 # ============================================================
 # 自动编码：prepare_dataset.py
 # 主要作用：从 SQLite 数据库读取鸟鸣检测结果，
@@ -66,7 +68,7 @@ SELECTION_TIME_LIMIT_SECONDS = 300
 # LABEL_TARGETS: 数据集的类别定义
 # 每条记录：
 #   db_label     - 数据库中的检测标签
-#   count        - 该类别的目标样本数（正例共1000，负例各250共1000）
+#   count        - 该数据库标签的目标样本数（负例子类型按此汇总，当前各500）
 #   label        - 二分类标签文本
 #   target_label - 数字标签（1=storm petrel, 0=not）
 #   negative_type - 负例的来源类型（other_bird / environment_noise）
@@ -164,6 +166,8 @@ BALANCE_REPORT_FIELDS = [
 # ============================================================
 @dataclass(frozen=True)
 class Candidate:
+    """保存一个数据库检测候选及其二分类元数据。"""
+
     db_label: str       # 数据库中的物种/声音标签
     species: str        # 物种名
     score: float        # 检测置信度
@@ -180,6 +184,8 @@ class Candidate:
 
 @dataclass(frozen=True)
 class FoldPlan:
+    """保存 outer 与 inner 层按来源录音分组的 fold 分配。"""
+
     outer_assignments: dict[str, int]          # source_file -> outer fold number
     inner_assignments: dict[int, dict[str, int]] # outer_fold -> {source_file -> inner fold}
 
@@ -208,7 +214,14 @@ def parse_detection_desc(desc: str) -> tuple[str, float]:
     return species.strip(), float(raw_score)
 
 
-def read_candidates(db_label: str, label: str, target_label: str, negative_type: str) -> list[Candidate]:
+def read_candidates(
+    db_label: str,
+    label: str,
+    target_label: str,
+    negative_type: str,
+    date_end: str | None = None,
+    date_start: str | None = None,
+) -> list[Candidate]:
     """
     从 SQLite 数据库中读取指定标签的检测候选 (第172行以下)。
     步骤：
@@ -216,11 +229,22 @@ def read_candidates(db_label: str, label: str, target_label: str, negative_type:
       2. 执行 JOIN 查询：calls 表 JOIN recordings 表获取录音文件信息
       3. 解析每个检测的 desc 字段（"物种名 分数"）
       4. 按分数降序、location、timestamp、start_seconds 升序排列
+
+    date_end:   可选，ISO 格式时间字符串。只保留 r.timestamp <= date_end 的记录。
+    date_start: 可选，ISO 格式时间字符串。只保留 r.timestamp >= date_start 的记录。
     """
     if not DB_PATH.is_file():
         raise FileNotFoundError(f"database not found: {DB_PATH}")
 
-    # 查询语句：匹配 calls.desc 以 "db_label " 开头的所有记录
+    date_clauses: list[str] = []
+    params: list[str] = []
+    if date_end is not None:
+        date_clauses.append("r.timestamp <= ?")
+        params.append(date_end)
+    if date_start is not None:
+        date_clauses.append("r.timestamp >= ?")
+        params.append(date_start)
+
     query = """
         select
             c.location,
@@ -236,9 +260,12 @@ def read_candidates(db_label: str, label: str, target_label: str, negative_type:
          and r.timestamp = c.timestamp
         where c.desc like ?
     """
+    for clause in date_clauses:
+        query += f"          and {clause}\n"
+
     rows: list[Candidate] = []
     with sqlite3.connect(DB_PATH) as connection:
-        for row in connection.execute(query, (f"{db_label} %",)):
+        for row in connection.execute(query, (f"{db_label} %", *params)):
             location, timestamp, start, end, desc, duration, recording_file = row
             species, score = parse_detection_desc(str(desc))
             rows.append(
@@ -355,8 +382,9 @@ def optimize_balanced_selection(
     使用混合整数线性规划 (MILP) 选择精确平衡的样本集。
 
     约束条件（按优先级）：
-      C1: 正例总数 = 1000（EXACT）
-      C2: 每种负例类型达到目标数量（各 250）
+      C1: 正例总数达到 LABEL_TARGETS 中配置的精确目标
+      C2: 每个负例数据库标签达到 LABEL_TARGETS 中配置的精确目标
+          （当前两个 negative_type 汇总后各 500）
       C3: 每个来源录音文件中，正例数 = 负例数（平衡配对）
       C4: 每个来源每个类别的片段数 <= MAX_CLIPS_PER_CLASS_PER_SOURCE
       C5: 同一来源内重叠的负例片段不能同时被选中（互斥约束）
@@ -410,7 +438,7 @@ def optimize_balanced_selection(
     positive_target = next(target["count"] for target in LABEL_TARGETS if target["target_label"] == "1")
     add_constraint({index: 1.0 for index in positive_indices}, positive_target, positive_target)
 
-    # C2: 各负例类型数量精确等于目标值
+    # C2: 各负例数据库标签数量精确等于目标值
     for target in LABEL_TARGETS:
         if target["target_label"] == "0":
             indices = negative_indices_by_label[target["db_label"]]
@@ -489,8 +517,11 @@ def optimize_balanced_selection(
             constraints=active_constraints,
             options={"time_limit": SELECTION_TIME_LIMIT_SECONDS, "mip_rel_gap": 0.0},
         )
-        if not result.success or result.x is None:
-            raise SampleSelectionError(f"Balanced sample selection is infeasible: {result.message}")
+        if result.status != 0 or not result.success or result.x is None:
+            raise SampleSelectionError(
+                "Balanced sample selection did not reach a proven optimum "
+                f"at stage {stage + 1}: status={result.status}, {result.message}"
+            )
         if stage < len(objectives) - 1:
             # 记录本阶段最优值，作为下一阶段的约束
             locked_rows.append(objective)
@@ -803,6 +834,8 @@ def assign_groups_to_folds(rows: list[dict[str, str]], fold_count: int, title: s
     upper_bounds: list[float] = []
 
     def add_constraint(coefficients: np.ndarray, lower: float, upper: float) -> None:
+        """向 fold-assignment 约束集合添加一行。"""
+
         constraint_rows.append(coefficients)
         lower_bounds.append(lower)
         upper_bounds.append(upper)
@@ -862,8 +895,10 @@ def assign_groups_to_folds(rows: list[dict[str, str]], fold_count: int, title: s
         ),
         options={"time_limit": 120, "mip_rel_gap": 0.0},
     )
-    if not result.success or result.x is None:
-        raise FoldAssignmentError(f"{title} cannot satisfy grouped fold constraints: {result.message}")
+    if result.status != 0 or not result.success or result.x is None:
+        raise FoldAssignmentError(
+            f"{title} did not reach a proven optimum: status={result.status}, {result.message}"
+        )
 
     # ---- 提取分配结果 ----
     assignments: dict[str, int] = {}
@@ -951,6 +986,8 @@ def build_balance_report_rows(fold_rows: list[dict[str, str]]) -> list[dict[str,
     report_rows: list[dict[str, str | int]] = []
 
     def append_stats(outer_fold: str, inner_fold: str, split: str, rows: list[dict[str, str]]) -> None:
+        """计算并追加一个 nested-CV 分区的平衡统计。"""
+
         stats = partition_stats(rows)
         report_rows.append(
             {

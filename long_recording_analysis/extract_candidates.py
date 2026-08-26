@@ -1,3 +1,5 @@
+"""从保存的长录音窗口分数中筛选并导出三秒候选音频。"""
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +40,8 @@ DETECTION_FIELDS = [
 
 @dataclass
 class HitGroup:
+    """描述一个独立的过阈值三秒窗口。"""
+
     recording: Path
     hit_start_seconds: float
     hit_end_seconds: float
@@ -74,6 +78,8 @@ def iter_hit_groups(scores_csv: Path, threshold: float) -> Iterator[HitGroup]:
 
 
 def read_candidate_audio(path: Path, start_seconds: float, end_seconds: float) -> np.ndarray:
+    """从原始录音读取指定的完整窗口并转换为模型采样率。"""
+
     with sf.SoundFile(path) as source:
         source_rate = int(source.samplerate)
         start_frame = max(0, int(round(start_seconds * source_rate)))
@@ -88,6 +94,8 @@ def read_candidate_audio(path: Path, start_seconds: float, end_seconds: float) -
 
 
 def candidate_name(recording: Path, index: int, start_seconds: float, end_seconds: float) -> str:
+    """生成稳定且包含录音时间信息的候选 WAV 文件名。"""
+
     digest = hashlib.sha1(str(recording).encode("utf-8")).hexdigest()[:10]
     safe_stem = "".join(character if character.isalnum() or character in "-_" else "_" for character in recording.stem)
     start_ms = round(start_seconds * 1_000)
@@ -102,6 +110,8 @@ def extract_candidates(
     threshold: float = DEFAULT_THRESHOLD,
     force: bool = False,
 ) -> int:
+    """应用阈值、写出检测清单并导出每个候选 WAV。"""
+
     if (detections_csv.exists() or candidates_dir.exists()) and not force:
         raise FileExistsError(
             f"Detection outputs already exist ({detections_csv}, {candidates_dir}). Use --force to replace them."
@@ -157,6 +167,8 @@ def extract_candidates(
 
 
 def parse_args() -> argparse.Namespace:
+    """解析候选截取输入、阈值和输出路径。"""
+
     parser = argparse.ArgumentParser(description="Extract each thresholded three-second window as a candidate WAV.")
     parser.add_argument("all_windows_csv", type=Path)
     parser.add_argument("--detections-csv", type=Path)
@@ -167,6 +179,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """运行候选截取命令行入口。"""
+
     args = parse_args()
     scores_csv = args.all_windows_csv.expanduser().resolve()
     run_dir = scores_csv.parent

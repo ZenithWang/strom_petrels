@@ -1,3 +1,5 @@
+"""检查项目要求的 Python 版本、包版本和原生依赖导入。"""
+
 from __future__ import annotations
 
 import importlib
@@ -23,6 +25,7 @@ REQUIRED_PACKAGES = {
     "matplotlib": "matplotlib",
     "numpy": "numpy",
     "pandas": "pandas",
+    "pytest": "pytest",
     "scikit-learn": "sklearn",
     "scipy": "scipy",
     "soundfile": "soundfile",
@@ -31,6 +34,8 @@ REQUIRED_PACKAGES = {
 
 
 def main() -> int:
+    """运行环境预检，并用进程返回码表示成功或失败。"""
+
     print(f"Python: {sys.version.split()[0]}")
     print(f"Interpreter: {sys.executable}")
     print(f"Platform: {platform.platform()}")

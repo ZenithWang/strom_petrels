@@ -1,3 +1,5 @@
+"""提供成鸟/雏鸟日期代理比较的稳定 Python 接口和 CLI。"""
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +41,8 @@ def run_analysis(
     force: bool = False,
     excluded_recordings: pd.DataFrame | None = None,
 ) -> Path:
+    """从已有窗口 CSV 生成全部日期代理分析产物。"""
+
     if not 0 <= threshold <= 1:
         raise ValueError("threshold must be between 0 and 1")
     if representative_count < 0:
@@ -114,6 +118,8 @@ def run_recording_analysis(
     rescan: bool = False,
     predictor: BatchPredictor | None = None,  # noqa: F405
 ) -> tuple[Path, bool]:
+    """从原始录音建立或复用缓存，然后完成日期代理分析。"""
+
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
     scores_path, excluded_recordings, reused = prepare_scan_cache(  # noqa: F405
@@ -141,6 +147,8 @@ def run_recording_analysis(
 
 
 def parse_args() -> argparse.Namespace:
+    """解析原始录音模式和已有分数模式的命令行参数。"""
+
     parser = argparse.ArgumentParser(
         description="Compare high-confidence adult-proxy and chick-proxy Storm Petrel detections."
     )
@@ -193,6 +201,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """选择输入模式并运行成鸟/雏鸟日期代理分析。"""
+
     args = parse_args()
     analysis_name = validate_name(args.analysis_name)  # noqa: F405
     output_dir = (

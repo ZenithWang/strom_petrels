@@ -1,3 +1,5 @@
+"""以相同目录结构把轻量项目源码安全同步到服务器。"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,6 +15,7 @@ SYNC_DIRECTORIES = (
     "long_recording_analysis",
     "comp_chick_adult",
     "results_analysis",
+    "chick_screening",
 )
 SYNC_FILES = (
     "project_config.py",
@@ -46,10 +49,14 @@ EXCLUDES = (
 
 
 def destination(target_root: str, name: str, directory: bool = False) -> str:
+    """构造远端文件或目录目标路径。"""
+
     return f"{target_root.rstrip('/')}/{name}{'/' if directory else ''}"
 
 
 def rsync_base(apply: bool) -> list[str]:
+    """构建包含安全排除规则的 rsync 基础命令。"""
+
     command = ["rsync", "-av", "--itemize-changes"]
     if not apply:
         command.append("--dry-run")
@@ -59,6 +66,8 @@ def rsync_base(apply: bool) -> list[str]:
 
 
 def build_commands(target_root: str, apply: bool, delete: bool) -> list[list[str]]:
+    """为根文件和功能目录生成独立的 rsync 命令。"""
+
     if not target_root.strip():
         raise ValueError("target_root must not be empty")
     base = rsync_base(apply)
@@ -81,6 +90,8 @@ def build_commands(target_root: str, apply: bool, delete: bool) -> list[list[str
 
 
 def run_sync(target_root: str, apply: bool = False, delete: bool = False) -> None:
+    """预览或执行源码同步，不传输数据和模型。"""
+
     if shutil.which("rsync") is None:
         raise FileNotFoundError("rsync is required but was not found on PATH")
     mode = "APPLY" if apply else "DRY RUN"
@@ -99,6 +110,8 @@ def run_sync(target_root: str, apply: bool = False, delete: bool = False) -> Non
 
 
 def parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
+    """解析远端目标、实际执行和清理陈旧源码选项。"""
+
     parser = argparse.ArgumentParser(
         description="Synchronize the complete workflow using the same physical layout on both machines."
     )
@@ -116,6 +129,8 @@ def parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> None:
+    """运行源码同步命令行入口。"""
+
     args = parse_args()
     run_sync(args.target, args.apply, args.delete)
 

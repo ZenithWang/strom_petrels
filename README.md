@@ -21,6 +21,7 @@ model_training/run_nested_cv.py           Nested-CV BirdNET training and evaluat
 model_training/train_deployment_model.py
 long_recording_analysis/                  Streaming inference and candidate extraction
 comp_chick_adult/                         Adult/chick date-proxy acoustic comparison
+chick_screening/                          Dual-model exploratory chick-call screening
 results_analysis/summarize_nested_cv.py
 workspace/                                Generated clips, folds, model outputs, summaries
 ```
@@ -150,6 +151,7 @@ export STORM_PETREL_MODEL_ROOT="$STORM_PETREL_WORKSPACE_DIR/models/nested_cv_bal
 export STORM_PETREL_DEPLOYMENT_MODEL_DIR="$STORM_PETREL_WORKSPACE_DIR/models/deployment"
 export STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR="$STORM_PETREL_WORKSPACE_DIR/long_recording_analysis"
 export STORM_PETREL_COMP_CHICK_ADULT_DIR="$STORM_PETREL_WORKSPACE_DIR/comp_chick_adult"
+export STORM_PETREL_CHICK_SCREENING_DIR="$STORM_PETREL_WORKSPACE_DIR/chick_screening"
 ```
 
 Meaning:
@@ -162,6 +164,7 @@ Meaning:
 - `STORM_PETREL_DEPLOYMENT_MODEL_DIR`: all-clips deployment model output
 - `STORM_PETREL_LONG_RECORDING_ANALYSIS_DIR`: long-recording scores, detections, and candidate WAV outputs
 - `STORM_PETREL_COMP_CHICK_ADULT_DIR`: adult/chick proxy tables, figures, reports, and representative audio
+- `STORM_PETREL_CHICK_SCREENING_DIR`: date-specific models, dual-model scores, and chick-screening analysis
 
 If a variable is not set, defaults are resolved relative to the project folder:
 
@@ -173,6 +176,7 @@ MODEL_ROOT    = workspace/models/nested_cv
 DEPLOYMENT_MODEL_DIR = workspace/models/deployment
 LONG_RECORDING_ANALYSIS_DIR = workspace/long_recording_analysis
 COMP_CHICK_ADULT_DIR = workspace/comp_chick_adult
+CHICK_SCREENING_DIR = workspace/chick_screening
 ```
 
 The training script prints the resolved project, dataset, and model paths before validating the fold directories.
@@ -188,6 +192,100 @@ Before data preparation, the server should have:
 ```
 
 The audio root should contain files referenced by the database recording names. Files are matched by filename or stem, including inside nested directories.
+
+## Complete End-to-End Workflow
+
+Run every command from the project root. The core reproducible pipeline and the two biological research
+tracks share configuration, but they produce separate outputs.
+
+### 1. One-time environment and path setup
+
+```bash
+conda env create -f environment.yml
+conda activate strompetrel
+cp .env.example .env
+# Edit .env with the real database, recording, project, and workspace paths.
+python verify_environment.py
+```
+
+On the documented server, an existing environment may instead be activated with
+`conda activate strompetrel-birdnet`. Always run `python verify_environment.py` after changing or updating
+the environment.
+
+### 2. Core dataset, nested-CV, and paper metrics
+
+```bash
+python data_processing/run_pipeline.py
+python model_training/run_nested_cv.py \
+  --outer-folds 01 02 03 04 05 \
+  --epochs 50 \
+  --threads 8
+python results_analysis/summarize_nested_cv.py
+```
+
+This is the complete reproducible path for the 2,000-clip binary dataset, grouped nested-CV models,
+out-of-fold predictions, error summary, and the recording-clustered bootstrap used in Table 5.3.
+
+### 3. Deployment model and long-recording detections
+
+```bash
+python model_training/train_deployment_model.py --epochs 50 --threads 8
+python long_recording_analysis/run_pipeline.py \
+  /absolute/path/to/recordings \
+  --run-name deployment_scan \
+  --threshold 0.80 \
+  --batch-size 32
+```
+
+### 4. Independent adult/chick date-proxy comparison
+
+```bash
+python comp_chick_adult/run_analysis.py \
+  --recordings-dir /absolute/path/to/recordings \
+  --analysis-name adult_proxy_vs_chick_proxy \
+  --threshold 0.80 \
+  --adult-proxy-end 2021-05-31 \
+  --chick-proxy-start 2021-07-23 \
+  --bootstrap-iterations 5000 \
+  --seed 2021
+```
+
+This track uses the deployment model. It performs its own date-filtered scan and cache, so the general
+long-recording command in step 3 is not a prerequisite.
+
+### 5. Exploratory dual-model chick-call screening
+
+```bash
+python chick_screening/run_pipeline.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00" \
+  --recordings-dir /absolute/path/to/chick_proxy_recordings \
+  --epochs 50 \
+  --threads 8 \
+  --adult-threshold 0.80 \
+  --chick-threshold 0.80
+```
+
+This separate exploratory track builds date-specific training datasets, trains adult-period and
+chick-period models, scores the same recordings with both models, and analyzes their discrepancies.
+Its date-proxy labels do not establish the biological age of the caller.
+
+### Execution order and restart rules
+
+```text
+environment/config
+    -> data preparation
+        -> grouped nested-CV training -> results summary/Table 5.3
+        -> deployment-model training -> long-recording scan
+                                  \-> adult/chick proxy comparison
+        -> date-specific datasets -> two date models -> dual scan -> chick screening analysis
+```
+
+- Run data preparation again only when the database, source recordings, selection constraints, or fold logic changes.
+- Use `--evaluate-only` when final nested-CV models exist and only outer predictions/metrics need rebuilding.
+- Change a long-recording threshold by rerunning candidate extraction; model inference does not need to repeat.
+- Use `--rescan` for adult/chick analysis only when recordings, model, or proxy-date boundaries changed.
+- `--force` options replace existing outputs. Read the printed target path before using them.
 
 ## Data Processing
 
@@ -333,6 +431,8 @@ python long_recording_analysis/run_pipeline.py \
 Both the default window and step are three seconds. A final tail shorter than three seconds is ignored.
 Every thresholded window becomes one
 strictly three-second, 48 kHz mono candidate; adjacent hits are not merged and no context is added.
+Outer-CV evaluation follows the same complete-window policy: a test clip shorter than three seconds
+raises an error instead of being padded, because it indicates a damaged or incomplete prepared dataset.
 `detections.csv` retains its established columns with `window_count=1`. Runs produced by the earlier
 1.5-second stepping workflow are not converted automatically: use a new run name and rescan.
 
@@ -410,6 +510,8 @@ The summary script reads from `STORM_PETREL_MODEL_ROOT` and writes:
 ```text
 $STORM_PETREL_MODEL_ROOT/nested_cv_summary.csv
 $STORM_PETREL_MODEL_ROOT/negative_type_error_summary.csv
+$STORM_PETREL_MODEL_ROOT/clustered_bootstrap_ci.csv
+$STORM_PETREL_MODEL_ROOT/model_metrics.tex
 ```
 
 `nested_cv_summary.csv` contains fold-level and mean/std metrics:
@@ -422,6 +524,114 @@ $STORM_PETREL_MODEL_ROOT/negative_type_error_summary.csv
 - AUROC
 
 `negative_type_error_summary.csv` summarizes false positives by negative subtype.
+`clustered_bootstrap_ci.csv` and `model_metrics.tex` reproduce the pooled estimates and 95% intervals
+in Table 5.3 by resampling whole source recordings 5,000 times with seed 2021. This formal bootstrap
+requires predictions from all five outer folds. For an intentionally partial smoke test, run the summary
+with `--skip-clustered-bootstrap`.
+
+## Exploratory Dual-model Chick Screening
+
+The `chick_screening` workflow is separate from the deployment-model adult/chick comparison above. It
+trains one model on the adult-proxy period and another on the chick-proxy period, applies both models to
+the same recordings, and divides windows into four score quadrants.
+
+Run the complete workflow:
+
+```bash
+python chick_screening/run_pipeline.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00" \
+  --recordings-dir /path/to/chick_proxy_recordings \
+  --epochs 50 --threads 8
+```
+
+Run its stages independently:
+
+```bash
+# Prepare both date-specific datasets.
+python chick_screening/prepare_date_dataset.py \
+  --adult-end "2021-05-31T23:59:59+00:00" \
+  --chick-start "2021-07-23T00:00:00+00:00"
+
+# Train both date-specific models.
+python chick_screening/train_date_models.py --epochs 50 --threads 8
+
+# Score recordings with both models.
+python chick_screening/dual_model_scan.py /path/to/recordings \
+  --output-csv workspace/chick_screening/dual_scores.csv \
+  --batch-size 32
+
+# Reanalyze saved scores without rescanning.
+python chick_screening/analyze_discrepancies.py \
+  --scores-csv workspace/chick_screening/dual_scores.csv \
+  --adult-threshold 0.80 \
+  --chick-threshold 0.80 \
+  --bootstrap-iterations 5000 \
+  --seed 2021
+```
+
+Use `--adult-only` or `--chick-only` on preparation/training commands when only one period needs to be
+rebuilt. The detailed output tree and interpretation cautions are documented in
+`chick_screening/README.md`.
+
+## Command Reference: Run Each Function Separately
+
+The table below lists every production command-line entry point. Use `python <script> --help` for the
+authoritative option list installed with the current code.
+
+| Function | Command | Primary output |
+|---|---|---|
+| Verify Python and packages | `python verify_environment.py` | terminal pass/fail report |
+| Preview/apply server sync | `python sync_project.py USER@HOST:PATH [--apply] [--delete]` | synchronized source tree |
+| Select clips, extract WAVs, build folds and datasets | `python data_processing/run_pipeline.py` | `workspace/clips`, manifests, folds, datasets |
+| Select/extract clips and write folds only | `python data_processing/prepare_dataset.py` | clips and fold CSV files |
+| Rebuild BirdNET directory layout from fold CSV | `python data_processing/build_birdnet_fold_dataset.py` | `workspace/nested_cv_datasets` |
+| Train/evaluate nested CV | `python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05` | fold models, predictions, metrics |
+| Re-evaluate existing nested-CV models | `python model_training/run_nested_cv.py --outer-folds 01 02 03 04 05 --evaluate-only --force` | refreshed predictions and metrics |
+| Train all-clips deployment model | `python model_training/train_deployment_model.py` | `workspace/models/deployment` |
+| Scan and extract long-recording candidates | `python long_recording_analysis/run_pipeline.py INPUT_DIR` | named long-recording run directory |
+| Run long-recording inference only | `python long_recording_analysis/scan_long_recordings.py INPUT_DIR --output-csv FILE` | `all_windows.csv` |
+| Apply/reapply threshold and export WAVs | `python long_recording_analysis/extract_candidates.py ALL_WINDOWS_CSV` | detections CSV and candidate WAVs |
+| Analyze adult/chick proxies from raw recordings | `python comp_chick_adult/run_analysis.py --recordings-dir INPUT_DIR` | cached scan, tables, figures, report |
+| Analyze adult/chick proxies from saved scores | `python comp_chick_adult/run_analysis.py ALL_WINDOWS_CSV [...]` | tables, figures, report |
+| Run all chick-screening stages | `python chick_screening/run_pipeline.py --recordings-dir INPUT_DIR` | date datasets, models, scores, analysis |
+| Prepare chick-screening datasets | `python chick_screening/prepare_date_dataset.py` | adult/chick clip datasets |
+| Train chick-screening models | `python chick_screening/train_date_models.py` | adult/chick TFLite models |
+| Run dual-model inference | `python chick_screening/dual_model_scan.py INPUT_DIR` | `dual_scores.csv` |
+| Analyze dual-model scores | `python chick_screening/analyze_discrepancies.py` | quadrant tables, figures, report |
+| Summarize nested CV and Table 5.3 | `python results_analysis/summarize_nested_cv.py` | summary CSVs and LaTeX table |
+
+## Validation, Smoke Tests, and Troubleshooting
+
+Run the complete lightweight automated test suite:
+
+```bash
+python -m pytest -q
+```
+
+Useful smoke tests that do not claim final model quality:
+
+```bash
+python model_training/run_nested_cv.py --outer-folds 04 --epochs 5 --threads 4
+python results_analysis/summarize_nested_cv.py --skip-clustered-bootstrap
+python chick_screening/run_pipeline.py --epochs 5 --threads 4 --skip-scan --skip-analysis
+```
+
+Check these conditions first when a run fails:
+
+- The resolved paths printed at startup point to the intended database, recordings, workspace, and model directory.
+- `python verify_environment.py` passes and reports Python 3.11 and BirdNET-Analyzer 2.4.0.
+- `STORM_PETREL_MODEL_ROOT` is `models/nested_cv_balanced`, not a legacy model/cache directory.
+- All five `outer_*/predictions.csv` files exist before running the formal clustered bootstrap.
+- Prepared CV clips are complete three-second, 48 kHz files; evaluation deliberately refuses to pad short clips.
+- A changed long-recording model, inventory, or proxy-date boundary requires a new scan or explicit `--rescan`.
+- On Windows, Numba and temporary paths should resolve under `workspace`; the scripts configure these automatically.
+
+## Generated Files and Git
+
+Do not commit databases, recordings, extracted clips, caches, trained models, or anything under
+`workspace/`. Commit only source, lightweight configuration, notebooks intended for inspection, README
+files, and small project documentation. The `.gitignore` already covers the main generated formats.
 
 ## Typical Server Run
 
@@ -445,7 +655,7 @@ For a quick single-fold smoke run on the server:
 
 ```bash
 python model_training/run_nested_cv.py --outer-folds 04 --epochs 5 --threads 4
-python results_analysis/summarize_nested_cv.py
+python results_analysis/summarize_nested_cv.py --skip-clustered-bootstrap
 ```
 
 ## Current Data Notes

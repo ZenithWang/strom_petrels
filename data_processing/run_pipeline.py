@@ -1,3 +1,5 @@
+"""串联样本准备与 BirdNET fold 数据集物化。"""
+
 from __future__ import annotations
 
 import sys
@@ -18,11 +20,13 @@ import build_birdnet_fold_dataset
 import prepare_dataset
 from project_config import PROJECT_ROOT, print_config
 
-TRAINING_SCRIPT = PROJECT_ROOT / "scripts" / "model_training" / "run_nested_cv.py"
-ANALYSIS_SCRIPT = PROJECT_ROOT / "scripts" / "results_analysis" / "summarize_nested_cv.py"
+TRAINING_SCRIPT = PROJECT_ROOT / "model_training" / "run_nested_cv.py"
+ANALYSIS_SCRIPT = PROJECT_ROOT / "results_analysis" / "summarize_nested_cv.py"
 
 
 def run_step(name: str, action) -> None:
+    """打印阶段标题并执行一个数据准备步骤。"""
+
     print(f"\n=== {name} ===")
     started = perf_counter()
     action()
@@ -31,6 +35,8 @@ def run_step(name: str, action) -> None:
 
 
 def main() -> None:
+    """运行完整数据准备管线。"""
+
     print_config()
     run_step("按指定标签准备二分类数据和 stratified grouped nested CV folds", prepare_dataset.main)
     run_step("生成 nested CV BirdNET 数据集目录", build_birdnet_fold_dataset.main)

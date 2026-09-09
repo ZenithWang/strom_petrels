@@ -1,8 +1,9 @@
 # Local tooling and editor state
 .agents/
-.codex/
 .idea/
 .vscode/
+.env
+.env.local
 
 # Python caches and environments
 __pycache__/
@@ -42,3 +43,4 @@ archive/
 Thumbs.db
 documents/download/
 documents/papers/*.pdf
+essay/

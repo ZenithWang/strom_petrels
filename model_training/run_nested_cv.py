@@ -1,3 +1,5 @@
+"""运行 grouped nested cross-validation 的 BirdNET 训练、推理和评估。"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,7 +18,7 @@ SCRIPTS_DIR = SCRIPT_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from project_config import DATASET_ROOT, FOLDS_PATH, MODEL_ROOT, NUMBA_CACHE_DIR, PROJECT_ROOT, TMP_DIR, print_config
+from project_config import DATASET_ROOT, FOLDS_PATH, MODEL_ROOT, NUMBA_CACHE_DIR, PROJECT_ROOT, TMP_DIR
 SAMPLE_RATE = 48_000
 SAMPLE_LENGTH = SAMPLE_RATE * 3
 POSITIVE_CLASS = "storm_petrel"
@@ -24,6 +26,8 @@ POSITIVE_CLASS = "storm_petrel"
 
 @dataclass(frozen=True)
 class HyperParameters:
+    """保存一组可复现的 BirdNET 分类头超参数。"""
+
     name: str
     learning_rate: str
     hidden_units: str
@@ -39,6 +43,8 @@ HYPERPARAMETERS = [
 
 # 这个方法是用来配置Windows系统下的Numba缓存和临时目录的。它会创建指定的缓存目录和临时目录（如果不存在），并将这些目录的路径设置为环境变量，以便Numba在运行时使用这些目录进行缓存和临时文件存储。
 def configure_windows_cache() -> None:
+    """把 Numba 与临时文件目录固定到项目 workspace。"""
+
     NUMBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["NUMBA_CACHE_DIR"] = str(NUMBA_CACHE_DIR)
@@ -52,6 +58,8 @@ def configure_windows_cache() -> None:
 # --force: 一个布尔标志，如果设置了这个标志，程序将重新运行折叠，即使metrics.csv文件已经存在。
 # --evaluate-only: 一个布尔标志，如果设置了这个标志，程序将不会进行训练，而是从现有的final_model/model.tflite文件中重新生成外部测试预测和指标。
 def parse_args() -> argparse.Namespace:
+    """解析 nested-CV 训练与仅评估模式的命令行参数。"""
+
     parser = argparse.ArgumentParser(description="Run grouped nested-CV BirdNET training.")
     parser.add_argument(
         "--outer-folds",
@@ -71,14 +79,20 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_fold(value: str) -> str:
+    """把 fold 编号规范化为两位字符串。"""
+
     return f"{int(value):02d}"
 
 
 def available_outer_folds() -> list[str]:
+    """返回当前数据集目录中可用的 outer fold 编号。"""
+
     return sorted(path.name.replace("outer_", "") for path in DATASET_ROOT.glob("outer_*") if path.is_dir())
 
 #检查输入的外部折叠目录是否存在，并检查折叠清单文件是否存在。如果缺少任何外部折叠目录或折叠清单文件，将引发FileNotFoundError异常。
 def validate_inputs(outer_folds: list[str]) -> None:
+    """在训练前验证请求的 fold 目录和 fold 清单。"""
+
     missing = [fold for fold in outer_folds if not (DATASET_ROOT / f"outer_{fold}").is_dir()]
     if missing:
         raise FileNotFoundError(f"Missing outer fold dataset directories: {missing}")
@@ -98,6 +112,8 @@ def run_birdnet_training(
     epochs: str,
     threads: str,
 ) -> bool:
+    """调用 BirdNET-Analyzer 训练命令，并返回进程是否成功。"""
+
     if not train_dir.is_dir() or not validation_dir.is_dir():
         print(f"Skip training; missing directory: train={train_dir}, validation={validation_dir}")
         return False
@@ -140,21 +156,29 @@ def run_birdnet_training(
 
 
 def metric_from_evaluation(path: Path) -> float:
+    """严格读取 BirdNET 评估 CSV 中 storm-petrel 类的 F1 指标。"""
+
     if not path.is_file():
-        print(f"Missing BirdNET evaluation file; score=0: {path}")
-        return 0.0
+        raise FileNotFoundError(f"Missing BirdNET evaluation file: {path}")
     rows = pd.read_csv(path)
     if rows.empty:
-        return 0.0
-    selected = rows[rows.get("Class", "") == POSITIVE_CLASS]
-    row = selected.iloc[0] if not selected.empty else rows.iloc[0]
+        raise ValueError(f"BirdNET evaluation file is empty: {path}")
+    if "Class" in rows.columns:
+        selected = rows[rows["Class"] == POSITIVE_CLASS]
+        if selected.empty:
+            raise ValueError(f"BirdNET evaluation file has no {POSITIVE_CLASS!r} row: {path}")
+        row = selected.iloc[0]
+    else:
+        row = rows.iloc[0]
     for key in ["F1 Score (opt)", "F1 Score (0.5)", "f1_opt", "f1_0_5"]:
         if key in row and pd.notna(row[key]):
             return float(row[key])
-    return 0.0
+    raise ValueError(f"BirdNET evaluation file has no supported F1 metric: {path}")
 
 
 def run_inner_search(outer_fold: str, epochs: str, threads: str) -> HyperParameters:
+    """运行一个 outer fold 的内层超参数搜索并返回最佳配置。"""
+
     outer_dataset = DATASET_ROOT / f"outer_{outer_fold}"
     outer_model_dir = MODEL_ROOT / f"outer_{outer_fold}"
     summary_rows = []
@@ -179,7 +203,12 @@ def run_inner_search(outer_fold: str, epochs: str, threads: str) -> HyperParamet
                 epochs,
                 threads,
             )
-            score = metric_from_evaluation(output_prefix.with_name(f"{output_prefix.name}_evaluation.csv")) if ok else 0.0
+            if not ok:
+                raise RuntimeError(
+                    f"BirdNET inner training failed for outer={outer_fold}, "
+                    f"inner={inner_dir.name}, params={params.name}"
+                )
+            score = metric_from_evaluation(output_prefix.with_name(f"{output_prefix.name}_evaluation.csv"))
             scores.append(score)
             summary_rows.append(
                 {
@@ -209,6 +238,8 @@ def run_inner_search(outer_fold: str, epochs: str, threads: str) -> HyperParamet
 
 
 def load_audio(path: Path) -> np.ndarray | None:
+    """读取严格三秒、48 kHz 的评估音频；不对短片段补零。"""
+
     import soundfile as sf
 
     audio, sample_rate = sf.read(str(path), dtype="float32")
@@ -218,11 +249,16 @@ def load_audio(path: Path) -> np.ndarray | None:
         print(f"Skipping sample-rate mismatch: {path} ({sample_rate})")
         return None
     if len(audio) < SAMPLE_LENGTH:
-        audio = np.pad(audio, (0, SAMPLE_LENGTH - len(audio)))
+        raise ValueError(
+            f"Evaluation clip is shorter than the required 3-second window; padding is disabled: "
+            f"{path} ({len(audio)}/{SAMPLE_LENGTH} samples)"
+        )
     return audio[:SAMPLE_LENGTH].astype("float32")
 
 
 def predict_tflite(model_path: Path, data_dir: Path) -> list[dict[str, str]]:
+    """使用 TFLite 模型为 BirdNET 文件夹数据集生成逐 clip 预测。"""
+
     if not model_path.is_file() or not data_dir.is_dir():
         print(f"No model or data directory to predict: model={model_path}, data={data_dir}")
         return []
@@ -264,6 +300,8 @@ def predict_tflite(model_path: Path, data_dir: Path) -> list[dict[str, str]]:
 
 
 def best_threshold(y_true: np.ndarray, scores: np.ndarray) -> tuple[float, float]:
+    """在固定网格上寻找 F1 最高的分类阈值。"""
+
     from sklearn.metrics import f1_score
 
     best = (0.5, -1.0)
@@ -275,6 +313,8 @@ def best_threshold(y_true: np.ndarray, scores: np.ndarray) -> tuple[float, float
 
 
 def write_evaluation(rows: list[dict[str, str]], output_prefix: Path, model_path: Path, data_dir: Path) -> dict[str, str]:
+    """写出逐 clip 预测和二分类评估指标。"""
+
     if not rows:
         print("No predictions; skipping metric write.")
         return {}
@@ -316,6 +356,8 @@ def write_evaluation(rows: list[dict[str, str]], output_prefix: Path, model_path
 
 
 def run_outer_fold(outer_fold: str, epochs: str, threads: str, force: bool) -> None:
+    """完成一个 outer fold 的内层搜索、最终训练和 held-out 评估。"""
+
     outer_dataset = DATASET_ROOT / f"outer_{outer_fold}"
     outer_model_dir = MODEL_ROOT / f"outer_{outer_fold}"
     if (outer_model_dir / "metrics.csv").is_file() and not force:
@@ -356,6 +398,8 @@ def run_outer_fold(outer_fold: str, epochs: str, threads: str, force: bool) -> N
 
 
 def evaluate_outer_fold(outer_fold: str) -> None:
+    """复用已有最终模型，重新生成一个 outer fold 的预测和指标。"""
+
     outer_dataset = DATASET_ROOT / f"outer_{outer_fold}"
     outer_model_dir = MODEL_ROOT / f"outer_{outer_fold}"
     model_path = outer_model_dir / "final_model" / "model.tflite"
@@ -369,16 +413,18 @@ def evaluate_outer_fold(outer_fold: str) -> None:
 
 
 def main() -> None:
+    """执行命令行请求的 outer folds。"""
+
     args = parse_args()
     configure_windows_cache()
     outer_folds = [normalize_fold(value) for value in args.outer_folds]
-    validate_inputs(outer_folds)
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Dataset root: {DATASET_ROOT}")
     print(f"Model root: {MODEL_ROOT}")
     print(f"Available outer folds: {available_outer_folds()}")
     print(f"Requested outer folds: {outer_folds}")
     print(f"Epochs: {args.epochs}; threads: {args.threads}")
+    validate_inputs(outer_folds)
     for outer_fold in outer_folds:
         print()
         print(f"=== Running outer fold {outer_fold} ===")
@@ -390,9 +436,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-

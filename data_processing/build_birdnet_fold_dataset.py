@@ -1,3 +1,5 @@
+"""把 fold 清单物化为 BirdNET-Analyzer 要求的类别目录结构。"""
+
 from __future__ import annotations
 
 import sys
@@ -15,19 +17,14 @@ SCRIPTS_DIR = SCRIPT_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from project_config import DATASET_ROOT, FOLDS_PATH, PROJECT_ROOT, WORKSPACE_DIR, print_config
+from project_config import CLIPS_DIR, DATASET_ROOT, FOLDS_PATH, print_config
 
 OUTPUT_ROOT = DATASET_ROOT
 POSITIVE_FOLDER = "storm_petrel"
 NEGATIVE_FOLDER = "not_storm_petrel"
-MISSING_CLIPS: list[Path] = []
 
 def read_rows(path: Path) -> list[dict[str, str]]:
-    """读取 nested CV fold 表；缺文件时只提示并返回空表。"""
-    if not path.is_file():
-        print(f"找不到 fold 表: {path}")
-        print("请先运行 python scripts\\data_processing\\build_grouped_cv_folds.py")
-        return []
+    """读取 nested CV fold 表。"""
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return [row for row in csv.DictReader(handle) if row.get("clip_id")]
 
@@ -37,41 +34,15 @@ def class_folder(row: dict[str, str]) -> str:
     return POSITIVE_FOLDER if row["target_label"] == "1" else NEGATIVE_FOLDER
 
 
-def resolve_clip_path(raw_path: str) -> Path:
-    """兼容旧标签表中的项目根路径变更，优先使用当前 workspace 下的实际文件。"""
-    source = Path(raw_path)
-    if source.is_file():
-        return source
-    parts = source.parts
-    if "workspace" in parts:
-        candidate = WORKSPACE_DIR.joinpath(*parts[parts.index("workspace") + 1:])
-        if candidate.is_file():
-            return candidate
-    return source
-
-
-def link_or_copy(source: Path, target: Path) -> None:
-    """优先创建硬链接；失败时复制。"""
-    if target.exists():
-        return
-    try:
-        os.link(source, target)
-    except OSError:
-        shutil.copy2(source, target)
-
-
 def copy_rows(rows: list[dict[str, str]], destination_root: Path) -> Counter[str]:
-    """把样本放到 BirdNET 文件夹结构；缺失文件会跳过并记录。"""
+    """用硬链接把 clips 放到 BirdNET 文件夹结构。"""
     counts: Counter[str] = Counter()
     for row in rows:
-        source = resolve_clip_path(row["clip_path"])
-        if not source.is_file():
-            MISSING_CLIPS.append(source)
-            continue
         folder = class_folder(row)
+        source = CLIPS_DIR / folder / f"{row['clip_id']}.wav"
         target_dir = destination_root / folder
         target_dir.mkdir(parents=True, exist_ok=True)
-        link_or_copy(source, target_dir / source.name)
+        os.link(source, target_dir / source.name)
         counts[folder] += 1
     for folder in (POSITIVE_FOLDER, NEGATIVE_FOLDER):
         (destination_root / folder).mkdir(parents=True, exist_ok=True)
@@ -107,17 +78,14 @@ def build_all_fold_datasets(folds_path: Path = FOLDS_PATH, output_root: Path = O
 
 
 def main() -> None:
+    """构建全部 outer/inner fold 数据集并打印计数。"""
+
     print_config()
     results = build_all_fold_datasets()
     print(f"已写出 nested CV BirdNET 数据集目录 {OUTPUT_ROOT}")
     for name, counts in sorted(results.items()):
         print(f"{name}: storm_petrel={counts[POSITIVE_FOLDER]}, not_storm_petrel={counts[NEGATIVE_FOLDER]}")
-    if MISSING_CLIPS:
-        print(f"跳过缺失 clip: {len(MISSING_CLIPS)} 个")
-        for path in MISSING_CLIPS[:5]:
-            print(f"  {path}")
 
 
 if __name__ == "__main__":
     main()
-
